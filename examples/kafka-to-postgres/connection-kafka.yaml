@@ -1,0 +1,11 @@
+apiVersion: dal.io/v1alpha1
+kind: Connection
+metadata:
+  name: kafka-events
+spec:
+  type: kafka
+  kafka:
+    brokers:
+      - kafka:9092
+    saslMechanism: none
+    credentialsRef: ""

@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package controlplane.v1;
+
+option go_package = "github.com/andersonlaurentino/dal-core/proto/gen/controlplane/v1;controlplanev1";
+
+// QueryPlanner is called by the broker to resolve which store/connection/
+// table should answer a query against a named Projection. This slice always
+// resolves to the single Postgres target of the Kafka->Postgres sync; the
+// request/response shape leaves room for future multi-store tiering
+// (time_range/filters on the request, ranked candidates on the response)
+// without breaking the contract.
+service QueryPlanner {
+  rpc ResolvePlan(ResolvePlanRequest) returns (ResolvePlanResponse);
+}
+
+message ResolvePlanRequest {
+  string projection_name = 1;
+}
+
+message ResolvePlanResponse {
+  string store_type = 1;        // "postgres" (only value this slice)
+  string connection_ref = 2;    // Connection to use
+  string target = 3;            // table name to query
+  int64  staleness_seconds = 4; // observed, informational
+  string dsn = 5;                // resolved connection string for store_type "postgres"
+}

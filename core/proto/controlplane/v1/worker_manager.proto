@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package controlplane.v1;
+
+option go_package = "github.com/andersonlaurentino/dal-core/proto/gen/controlplane/v1;controlplanev1";
+
+// WorkerManager is called by worker processes to register on boot, report
+// periodic health/lag, and report fatal errors before exiting. The control
+// plane's reconciliation loop uses this, plus the Redis heartbeat TTL key,
+// to decide whether a worker needs to be (re)spawned.
+service WorkerManager {
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportError(ReportErrorRequest) returns (ReportErrorResponse);
+}
+
+message RegisterWorkerRequest {
+  string sync_name = 1;
+  int64  pid = 2;
+}
+
+message RegisterWorkerResponse {}
+
+message HeartbeatRequest {
+  string sync_name = 1;
+  string phase = 2;            // "running" | "degraded" | "stopped"
+  int64  consumer_lag = 3;     // messages behind, kafka-source syncs
+  string watermark = 4;        // opaque: offset string, or ISO timestamp for batch
+  int64  timestamp_unix = 5;
+}
+
+message HeartbeatResponse {}
+
+message ReportErrorRequest {
+  string sync_name = 1;
+  string message = 2;
+  bool   fatal = 3;
+}
+
+message ReportErrorResponse {}

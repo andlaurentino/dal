@@ -1,0 +1,9 @@
+apiVersion: dal.io/v1alpha1
+kind: Connection
+metadata:
+  name: pg-warehouse
+spec:
+  type: postgres
+  postgres:
+    dsn: "postgres://dal:dal@postgres:5432/dal?sslmode=disable"
+    credentialsRef: ""

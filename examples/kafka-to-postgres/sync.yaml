@@ -1,0 +1,30 @@
+apiVersion: dal.io/v1alpha1
+kind: Sync
+metadata:
+  name: events-to-warehouse
+spec:
+  source:
+    connectionRef: kafka-events
+    topic: user-events
+  target:
+    connectionRef: pg-warehouse
+    table: user_events
+  mode: streaming
+  replication: delta
+  schedule: ""
+  mapping:
+    keyField: event_id
+    schema:
+      - jsonPath: "$.event_id"
+        column: event_id
+        type: text
+      - jsonPath: "$.user_id"
+        column: user_id
+        type: text
+      - jsonPath: "$.event_type"
+        column: event_type
+        type: text
+      - jsonPath: "$.occurred_at"
+        column: occurred_at
+        type: timestamptz
+  consumerGroup: dal-worker-events-to-warehouse

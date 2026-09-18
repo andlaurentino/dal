@@ -1,0 +1,79 @@
+# Single-node Redpanda (Kafka-API compatible), matching docker-compose's
+# rationale: no ZooKeeper, fast startup, auto-topic-creation on by default.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kafka-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  labels: { app: kafka }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: kafka }
+  template:
+    metadata:
+      labels: { app: kafka }
+    spec:
+      containers:
+        - name: kafka
+          image: redpandadata/redpanda:v24.2.18
+          # Two listeners: "internal" is what in-cluster Pods (workerd) use
+          # via the ClusterIP Service DNS name; "external" is what anything
+          # outside the cluster (tools/producer run from a host shell) uses
+          # via the NodePort below — each must advertise the address its own
+          # clients will actually reconnect to after the initial handshake.
+          args:
+            - redpanda
+            - start
+            - --smp=1
+            - --memory=512M
+            - --overprovisioned
+            - --node-id=0
+            - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+            - --advertise-kafka-addr=internal://kafka:9092,external://localhost:30920
+          ports:
+            - containerPort: 9092
+            - containerPort: 19092
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+          readinessProbe:
+            tcpSocket: { port: 9092 }
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: kafka-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  selector: { app: kafka }
+  ports:
+    - port: 9092
+      targetPort: 9092
+---
+# NodePort so the standalone tools/producer can publish from outside the
+# cluster (e.g. `go run ./cmd/producer --brokers=localhost:30920`) — routes
+# to the "external" listener above, which advertises this same address.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external
+spec:
+  type: NodePort
+  selector: { app: kafka }
+  ports:
+    - port: 19092
+      targetPort: 19092
+      nodePort: 30920
