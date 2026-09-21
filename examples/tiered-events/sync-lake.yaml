@@ -1,14 +1,17 @@
+# Full-history sync: kafka -> lake, same topic/mapping as sync-postgres.yaml,
+# no retention — this Delta table (with Change Data Feed enabled) is the
+# durable record of every event ever produced.
 apiVersion: dal.io/v1alpha1
 kind: Sync
 metadata:
-  name: events-to-warehouse
+  name: events-to-lake
 spec:
   source:
     connectionRef: kafka-events
     topic: user-events
   target:
-    connectionRef: pg-warehouse
-    table: user_events
+    connectionRef: minio-lake
+    path: events/raw
   mode: streaming
   replication: delta
   schedule: ""
@@ -27,4 +30,4 @@ spec:
       - jsonPath: "$.occurred_at"
         column: occurred_at
         type: timestamptz
-  consumerGroup: dal-worker-events-to-warehouse
+  consumerGroup: ""

@@ -1,0 +1,20 @@
+# Tiered view: recent pages come from postgres (events-to-postgres, 7-day
+# retention), older pages come from the lake (events-to-lake, full
+# history) — broker stitches pages that straddle the cutover so every page
+# still returns defaultLimit rows.
+apiVersion: dal.io/v1alpha1
+kind: Projection
+metadata:
+  name: events-combined
+spec:
+  sources:
+    - syncRef: events-to-postgres
+      maxStalenessSeconds: 30
+    - syncRef: events-to-lake
+      maxStalenessSeconds: 300
+  queryable:
+    table: user_events
+    defaultLimit: 20
+  tiering:
+    recentSyncRef: events-to-postgres
+    historicalSyncRef: events-to-lake

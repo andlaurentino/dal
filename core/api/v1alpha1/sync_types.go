@@ -35,16 +35,41 @@ type SyncSpec struct {
 	Mapping  SyncMapping `json:"mapping" yaml:"mapping"`
 	// ConsumerGroup defaults to "dal-worker-{metadata.name}" when empty.
 	ConsumerGroup string `json:"consumerGroup,omitempty" yaml:"consumerGroup,omitempty"`
+	// Retention prunes rows older than Days from a postgres target,
+	// enforced by workerd via periodic DELETEs. Only valid when the target
+	// connection is postgres. A Projection's spec.tiering reuses this same
+	// window as its recent/historical cutover rather than duplicating it.
+	Retention *SyncRetention `json:"retention,omitempty" yaml:"retention,omitempty"`
 }
 
+type SyncRetention struct {
+	Days int64 `json:"days" yaml:"days"`
+	// TimestampColumn must name a column in Mapping.Schema of type
+	// timestamptz/timestamp.
+	TimestampColumn string `json:"timestampColumn" yaml:"timestampColumn"`
+}
+
+// SyncSource identifies the readable side of a Sync. Exactly one of Topic
+// (kafka connections) or Path (datalake connections) applies, depending on
+// the referenced Connection's type. CheckpointPath is required alongside
+// Path: it's the folder in the same datalake bucket where the worker
+// persists its Change Data Feed read cursor (the last-processed Delta table
+// version), since — unlike a Kafka consumer group — Delta versions aren't
+// tracked by an external broker.
 type SyncSource struct {
-	ConnectionRef string `json:"connectionRef" yaml:"connectionRef"`
-	Topic         string `json:"topic" yaml:"topic"`
+	ConnectionRef  string `json:"connectionRef" yaml:"connectionRef"`
+	Topic          string `json:"topic,omitempty" yaml:"topic,omitempty"`
+	Path           string `json:"path,omitempty" yaml:"path,omitempty"`
+	CheckpointPath string `json:"checkpointPath,omitempty" yaml:"checkpointPath,omitempty"`
 }
 
+// SyncTarget identifies the writable side of a Sync. Exactly one of Table
+// (postgres connections) or Path (datalake connections) applies, depending
+// on the referenced Connection's type.
 type SyncTarget struct {
 	ConnectionRef string `json:"connectionRef" yaml:"connectionRef"`
-	Table         string `json:"table" yaml:"table"`
+	Table         string `json:"table,omitempty" yaml:"table,omitempty"`
+	Path          string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
 type SyncMapping struct {

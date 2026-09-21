@@ -101,11 +101,14 @@ export async function applySyncAction(
   const spec = {
     source: {
       connectionRef: String(formData.get("sourceConnectionRef") ?? ""),
-      topic: String(formData.get("sourceTopic") ?? ""),
+      topic: String(formData.get("sourceTopic") ?? "") || undefined,
+      path: String(formData.get("sourcePath") ?? "") || undefined,
+      checkpointPath: String(formData.get("sourceCheckpointPath") ?? "") || undefined,
     },
     target: {
       connectionRef: String(formData.get("targetConnectionRef") ?? ""),
-      table: String(formData.get("targetTable") ?? ""),
+      table: String(formData.get("targetTable") ?? "") || undefined,
+      path: String(formData.get("targetPath") ?? "") || undefined,
     },
     mode: String(formData.get("mode") ?? ""),
     replication: String(formData.get("replication") ?? ""),

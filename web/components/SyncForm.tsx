@@ -101,12 +101,35 @@ export default function SyncForm({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Source topic" htmlFor="sourceTopic" error={errors["source.topic"]}>
+        <Field label="Source topic (kafka)" htmlFor="sourceTopic" error={errors["source.topic"]}>
           <Input
             id="sourceTopic"
             name="sourceTopic"
             defaultValue={initial?.spec.source.topic}
             placeholder="user-events"
+          />
+        </Field>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Source path (datalake)" htmlFor="sourcePath" error={errors["source.path"]}>
+          <Input
+            id="sourcePath"
+            name="sourcePath"
+            defaultValue={initial?.spec.source.path}
+            placeholder="events/raw"
+          />
+        </Field>
+        <Field
+          label="Source checkpoint path (datalake CDF cursor)"
+          htmlFor="sourceCheckpointPath"
+          error={errors["source.checkpointPath"]}
+        >
+          <Input
+            id="sourceCheckpointPath"
+            name="sourceCheckpointPath"
+            defaultValue={initial?.spec.source.checkpointPath}
+            placeholder="checkpoints/my-sync"
           />
         </Field>
       </div>
@@ -126,12 +149,23 @@ export default function SyncForm({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Target table" htmlFor="targetTable" error={errors["target.table"]}>
+        <Field label="Target table (postgres)" htmlFor="targetTable" error={errors["target.table"]}>
           <Input
             id="targetTable"
             name="targetTable"
             defaultValue={initial?.spec.target.table}
             placeholder="user_events"
+          />
+        </Field>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Target path (datalake)" htmlFor="targetPath" error={errors["target.path"]}>
+          <Input
+            id="targetPath"
+            name="targetPath"
+            defaultValue={initial?.spec.target.path}
+            placeholder="events/raw"
           />
         </Field>
       </div>

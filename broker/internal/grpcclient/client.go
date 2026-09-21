@@ -28,6 +28,9 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+// ResolvePlan returns the query plan for a Projection. Primary is always
+// set; Historical/CutoverColumn/RetentionDays are only set for a tiered
+// projection (see core/proto/controlplane/v1/query_plan.proto).
 func (c *Client) ResolvePlan(ctx context.Context, projectionName string) (*controlplanev1.ResolvePlanResponse, error) {
 	return c.rpc.ResolvePlan(ctx, &controlplanev1.ResolvePlanRequest{ProjectionName: projectionName})
 }

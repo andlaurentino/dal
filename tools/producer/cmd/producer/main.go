@@ -33,6 +33,8 @@ func main() {
 	count := flag.Int("count", 0, "number of events to publish (0 = run forever)")
 	interval := flag.Duration("interval", time.Second, "delay between published events")
 	users := flag.Int("users", 5, "number of distinct synthetic user IDs to cycle through")
+	backdate := flag.Duration("backdate", 0, "base age applied to every published event's occurred_at (e.g. 720h for 30 days ago); for seeding historical/pre-retention test data")
+	backdateJitter := flag.Duration("backdate-jitter", 0, "additional random age in [0, backdate-jitter) applied on top of --backdate, so a single load job spreads timestamps across a range instead of one instant")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -46,11 +48,15 @@ func main() {
 
 	ctx := context.Background()
 	for i := 0; *count == 0 || i < *count; i++ {
+		age := *backdate
+		if *backdateJitter > 0 {
+			age += time.Duration(rand.Int63n(int64(*backdateJitter)))
+		}
 		evt := event{
 			EventID:    fmt.Sprintf("evt-%d-%d", time.Now().UnixNano(), i),
 			UserID:     fmt.Sprintf("user-%d", rand.Intn(*users)+1),
 			EventType:  eventTypes[rand.Intn(len(eventTypes))],
-			OccurredAt: time.Now().UTC().Format(time.RFC3339),
+			OccurredAt: time.Now().UTC().Add(-age).Format(time.RFC3339),
 		}
 		body, err := json.Marshal(evt)
 		if err != nil {

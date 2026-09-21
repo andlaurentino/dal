@@ -59,8 +59,19 @@ export default async function SyncDetailPage({
             <Link href={`/connections/${spec.source.connectionRef}`} className="hover:underline">
               {spec.source.connectionRef}
             </Link>
-            <span className="mt-2 text-muted-foreground">Topic</span>
-            <span>{spec.source.topic}</span>
+            {spec.source.topic ? (
+              <>
+                <span className="mt-2 text-muted-foreground">Topic</span>
+                <span>{spec.source.topic}</span>
+              </>
+            ) : (
+              <>
+                <span className="mt-2 text-muted-foreground">Path</span>
+                <span>{spec.source.path}</span>
+                <span className="mt-2 text-muted-foreground">Checkpoint path</span>
+                <span>{spec.source.checkpointPath}</span>
+              </>
+            )}
           </CardContent>
         </Card>
         <ArrowRight className="mx-auto hidden size-6 text-muted-foreground sm:block" />
@@ -73,8 +84,17 @@ export default async function SyncDetailPage({
             <Link href={`/connections/${spec.target.connectionRef}`} className="hover:underline">
               {spec.target.connectionRef}
             </Link>
-            <span className="mt-2 text-muted-foreground">Table</span>
-            <span>{spec.target.table}</span>
+            {spec.target.table ? (
+              <>
+                <span className="mt-2 text-muted-foreground">Table</span>
+                <span>{spec.target.table}</span>
+              </>
+            ) : (
+              <>
+                <span className="mt-2 text-muted-foreground">Path</span>
+                <span>{spec.target.path}</span>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>

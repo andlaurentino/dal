@@ -27,11 +27,13 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // QueryPlanner is called by the broker to resolve which store/connection/
-// table should answer a query against a named Projection. This slice always
-// resolves to the single Postgres target of the Kafka->Postgres sync; the
-// request/response shape leaves room for future multi-store tiering
-// (time_range/filters on the request, ranked candidates on the response)
-// without breaking the contract.
+// table should answer a query against a named Projection. For a plain
+// (untiered) Projection, only `primary` is set — the single Postgres or
+// datalake target of its one Sync. For a tiered Projection (spec.tiering),
+// both `primary` (the retention-limited recent source, always postgres
+// today) and `historical` (the full-history source, always datalake today)
+// are set, along with the retention window broker needs to decide which
+// store answers which page.
 type QueryPlannerClient interface {
 	ResolvePlan(ctx context.Context, in *ResolvePlanRequest, opts ...grpc.CallOption) (*ResolvePlanResponse, error)
 }
@@ -59,11 +61,13 @@ func (c *queryPlannerClient) ResolvePlan(ctx context.Context, in *ResolvePlanReq
 // for forward compatibility.
 //
 // QueryPlanner is called by the broker to resolve which store/connection/
-// table should answer a query against a named Projection. This slice always
-// resolves to the single Postgres target of the Kafka->Postgres sync; the
-// request/response shape leaves room for future multi-store tiering
-// (time_range/filters on the request, ranked candidates on the response)
-// without breaking the contract.
+// table should answer a query against a named Projection. For a plain
+// (untiered) Projection, only `primary` is set — the single Postgres or
+// datalake target of its one Sync. For a tiered Projection (spec.tiering),
+// both `primary` (the retention-limited recent source, always postgres
+// today) and `historical` (the full-history source, always datalake today)
+// are set, along with the retention window broker needs to decide which
+// store answers which page.
 type QueryPlannerServer interface {
 	ResolvePlan(context.Context, *ResolvePlanRequest) (*ResolvePlanResponse, error)
 	mustEmbedUnimplementedQueryPlannerServer()

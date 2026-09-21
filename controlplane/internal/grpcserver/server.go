@@ -58,11 +58,25 @@ func (s *Server) ResolvePlan(ctx context.Context, req *controlplanev1.ResolvePla
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
 
-	return &controlplanev1.ResolvePlanResponse{
-		StoreType:        plan.StoreType,
-		ConnectionRef:    plan.ConnectionRef,
-		Target:           plan.Target,
+	resp := &controlplanev1.ResolvePlanResponse{
+		Primary:          storePlanProto(plan.Primary),
 		StalenessSeconds: plan.StalenessSeconds,
-		Dsn:              plan.DSN,
-	}, nil
+	}
+	if plan.Historical != nil {
+		resp.Historical = storePlanProto(*plan.Historical)
+		resp.CutoverColumn = plan.CutoverColumn
+		resp.RetentionDays = plan.RetentionDays
+	}
+	return resp, nil
+}
+
+func storePlanProto(sp planner.StorePlan) *controlplanev1.StorePlan {
+	return &controlplanev1.StorePlan{
+		StoreType:     sp.StoreType,
+		ConnectionRef: sp.ConnectionRef,
+		Target:        sp.Target,
+		Dsn:           sp.DSN,
+		Endpoint:      sp.Endpoint,
+		Bucket:        sp.Bucket,
+	}
 }

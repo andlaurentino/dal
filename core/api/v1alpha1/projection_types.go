@@ -12,6 +12,20 @@ type Projection struct {
 type ProjectionSpec struct {
 	Sources   []ProjectionSource  `json:"sources" yaml:"sources"`
 	Queryable ProjectionQueryable `json:"queryable" yaml:"queryable"`
+	// Tiering combines a retention-limited "recent" source with a
+	// full-history "historical" source into one queryable projection.
+	// Unset for plain single-source projections.
+	Tiering *ProjectionTiering `json:"tiering,omitempty" yaml:"tiering,omitempty"`
+}
+
+// ProjectionTiering routes queries across two Sources by age: pages within
+// RecentSyncRef's own Sync.Spec.Retention window are served from it, older
+// pages come from HistoricalSyncRef — the cutover point is read from that
+// retention window, not duplicated here. Both refs must also appear in
+// Spec.Sources.
+type ProjectionTiering struct {
+	RecentSyncRef     string `json:"recentSyncRef" yaml:"recentSyncRef"`
+	HistoricalSyncRef string `json:"historicalSyncRef" yaml:"historicalSyncRef"`
 }
 
 type ProjectionSource struct {

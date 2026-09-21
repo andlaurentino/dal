@@ -47,8 +47,12 @@ func (e *Executor) db(dsn string) (*sql.DB, error) {
 }
 
 // Query returns the target table's columns (in ordinal order), a page of
-// rows, and the total row count.
-func (e *Executor) Query(ctx context.Context, dsn, table string, limit, offset int) ([]Column, [][]any, int64, error) {
+// rows, and the total row count. orderBy, when non-empty, names a column to
+// sort by descending before applying limit/offset — required for stable,
+// recency-first pagination when this executor is one half of a tiered
+// (postgres + lake) projection; left empty it preserves the historical
+// unordered-scan behavior for plain single-store projections.
+func (e *Executor) Query(ctx context.Context, dsn, table, orderBy string, limit, offset int) ([]Column, [][]any, int64, error) {
 	db, err := e.db(dsn)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("connecting to postgres: %w", err)
@@ -69,7 +73,13 @@ func (e *Executor) Query(ctx context.Context, dsn, table string, limit, offset i
 		return nil, nil, 0, fmt.Errorf("counting rows: %w", err)
 	}
 
-	rows, err := db.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s LIMIT $1 OFFSET $2", ident), limit, offset)
+	query := fmt.Sprintf("SELECT * FROM %s", ident)
+	if orderBy != "" {
+		query += fmt.Sprintf(" ORDER BY %s DESC", pgx.Identifier{orderBy}.Sanitize())
+	}
+	query += " LIMIT $1 OFFSET $2"
+
+	rows, err := db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("querying rows: %w", err)
 	}

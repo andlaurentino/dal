@@ -1,0 +1,12 @@
+# Recent-only view: last 7 days, served entirely from postgres.
+apiVersion: dal.io/v1alpha1
+kind: Projection
+metadata:
+  name: events-recent
+spec:
+  sources:
+    - syncRef: events-to-postgres
+      maxStalenessSeconds: 30
+  queryable:
+    table: user_events
+    defaultLimit: 20

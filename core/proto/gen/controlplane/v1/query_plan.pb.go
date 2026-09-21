@@ -65,20 +65,106 @@ func (x *ResolvePlanRequest) GetProjectionName() string {
 	return ""
 }
 
+// StorePlan is everything broker needs to execute a read against one
+// resolved store.
+type StorePlan struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StoreType     string                 `protobuf:"bytes,1,opt,name=store_type,json=storeType,proto3" json:"store_type,omitempty"`             // "postgres" | "datalake"
+	ConnectionRef string                 `protobuf:"bytes,2,opt,name=connection_ref,json=connectionRef,proto3" json:"connection_ref,omitempty"` // Connection to use
+	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`                                    // table name (postgres) or lake path (datalake)
+	Dsn           string                 `protobuf:"bytes,4,opt,name=dsn,proto3" json:"dsn,omitempty"`                                          // resolved connection string, postgres only
+	Endpoint      string                 `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                // MinIO endpoint, datalake only
+	Bucket        string                 `protobuf:"bytes,6,opt,name=bucket,proto3" json:"bucket,omitempty"`                                    // bucket name, datalake only
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StorePlan) Reset() {
+	*x = StorePlan{}
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorePlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorePlan) ProtoMessage() {}
+
+func (x *StorePlan) ProtoReflect() protoreflect.Message {
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorePlan.ProtoReflect.Descriptor instead.
+func (*StorePlan) Descriptor() ([]byte, []int) {
+	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *StorePlan) GetStoreType() string {
+	if x != nil {
+		return x.StoreType
+	}
+	return ""
+}
+
+func (x *StorePlan) GetConnectionRef() string {
+	if x != nil {
+		return x.ConnectionRef
+	}
+	return ""
+}
+
+func (x *StorePlan) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *StorePlan) GetDsn() string {
+	if x != nil {
+		return x.Dsn
+	}
+	return ""
+}
+
+func (x *StorePlan) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *StorePlan) GetBucket() string {
+	if x != nil {
+		return x.Bucket
+	}
+	return ""
+}
+
 type ResolvePlanResponse struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	StoreType        string                 `protobuf:"bytes,1,opt,name=store_type,json=storeType,proto3" json:"store_type,omitempty"`                       // "postgres" (only value this slice)
-	ConnectionRef    string                 `protobuf:"bytes,2,opt,name=connection_ref,json=connectionRef,proto3" json:"connection_ref,omitempty"`           // Connection to use
-	Target           string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`                                              // table name to query
-	StalenessSeconds int64                  `protobuf:"varint,4,opt,name=staleness_seconds,json=stalenessSeconds,proto3" json:"staleness_seconds,omitempty"` // observed, informational
-	Dsn              string                 `protobuf:"bytes,5,opt,name=dsn,proto3" json:"dsn,omitempty"`                                                    // resolved connection string for store_type "postgres"
+	Primary          *StorePlan             `protobuf:"bytes,1,opt,name=primary,proto3" json:"primary,omitempty"`                                            // always set
+	Historical       *StorePlan             `protobuf:"bytes,2,opt,name=historical,proto3" json:"historical,omitempty"`                                      // set only for a tiered projection
+	CutoverColumn    string                 `protobuf:"bytes,3,opt,name=cutover_column,json=cutoverColumn,proto3" json:"cutover_column,omitempty"`           // set only for a tiered projection
+	RetentionDays    int64                  `protobuf:"varint,4,opt,name=retention_days,json=retentionDays,proto3" json:"retention_days,omitempty"`          // set only for a tiered projection
+	StalenessSeconds int64                  `protobuf:"varint,5,opt,name=staleness_seconds,json=stalenessSeconds,proto3" json:"staleness_seconds,omitempty"` // observed, informational
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ResolvePlanResponse) Reset() {
 	*x = ResolvePlanResponse{}
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -90,7 +176,7 @@ func (x *ResolvePlanResponse) String() string {
 func (*ResolvePlanResponse) ProtoMessage() {}
 
 func (x *ResolvePlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -103,28 +189,35 @@ func (x *ResolvePlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolvePlanResponse.ProtoReflect.Descriptor instead.
 func (*ResolvePlanResponse) Descriptor() ([]byte, []int) {
-	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{1}
+	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ResolvePlanResponse) GetStoreType() string {
+func (x *ResolvePlanResponse) GetPrimary() *StorePlan {
 	if x != nil {
-		return x.StoreType
+		return x.Primary
+	}
+	return nil
+}
+
+func (x *ResolvePlanResponse) GetHistorical() *StorePlan {
+	if x != nil {
+		return x.Historical
+	}
+	return nil
+}
+
+func (x *ResolvePlanResponse) GetCutoverColumn() string {
+	if x != nil {
+		return x.CutoverColumn
 	}
 	return ""
 }
 
-func (x *ResolvePlanResponse) GetConnectionRef() string {
+func (x *ResolvePlanResponse) GetRetentionDays() int64 {
 	if x != nil {
-		return x.ConnectionRef
+		return x.RetentionDays
 	}
-	return ""
-}
-
-func (x *ResolvePlanResponse) GetTarget() string {
-	if x != nil {
-		return x.Target
-	}
-	return ""
+	return 0
 }
 
 func (x *ResolvePlanResponse) GetStalenessSeconds() int64 {
@@ -134,27 +227,29 @@ func (x *ResolvePlanResponse) GetStalenessSeconds() int64 {
 	return 0
 }
 
-func (x *ResolvePlanResponse) GetDsn() string {
-	if x != nil {
-		return x.Dsn
-	}
-	return ""
-}
-
 var File_controlplane_v1_query_plan_proto protoreflect.FileDescriptor
 
 const file_controlplane_v1_query_plan_proto_rawDesc = "" +
 	"\n" +
 	" controlplane/v1/query_plan.proto\x12\x0fcontrolplane.v1\"=\n" +
 	"\x12ResolvePlanRequest\x12'\n" +
-	"\x0fprojection_name\x18\x01 \x01(\tR\x0eprojectionName\"\xb2\x01\n" +
-	"\x13ResolvePlanResponse\x12\x1d\n" +
+	"\x0fprojection_name\x18\x01 \x01(\tR\x0eprojectionName\"\xaf\x01\n" +
+	"\tStorePlan\x12\x1d\n" +
 	"\n" +
 	"store_type\x18\x01 \x01(\tR\tstoreType\x12%\n" +
 	"\x0econnection_ref\x18\x02 \x01(\tR\rconnectionRef\x12\x16\n" +
-	"\x06target\x18\x03 \x01(\tR\x06target\x12+\n" +
-	"\x11staleness_seconds\x18\x04 \x01(\x03R\x10stalenessSeconds\x12\x10\n" +
-	"\x03dsn\x18\x05 \x01(\tR\x03dsn2h\n" +
+	"\x06target\x18\x03 \x01(\tR\x06target\x12\x10\n" +
+	"\x03dsn\x18\x04 \x01(\tR\x03dsn\x12\x1a\n" +
+	"\bendpoint\x18\x05 \x01(\tR\bendpoint\x12\x16\n" +
+	"\x06bucket\x18\x06 \x01(\tR\x06bucket\"\x82\x02\n" +
+	"\x13ResolvePlanResponse\x124\n" +
+	"\aprimary\x18\x01 \x01(\v2\x1a.controlplane.v1.StorePlanR\aprimary\x12:\n" +
+	"\n" +
+	"historical\x18\x02 \x01(\v2\x1a.controlplane.v1.StorePlanR\n" +
+	"historical\x12%\n" +
+	"\x0ecutover_column\x18\x03 \x01(\tR\rcutoverColumn\x12%\n" +
+	"\x0eretention_days\x18\x04 \x01(\x03R\rretentionDays\x12+\n" +
+	"\x11staleness_seconds\x18\x05 \x01(\x03R\x10stalenessSeconds2h\n" +
 	"\fQueryPlanner\x12X\n" +
 	"\vResolvePlan\x12#.controlplane.v1.ResolvePlanRequest\x1a$.controlplane.v1.ResolvePlanResponseBQZOgithub.com/andersonlaurentino/dal-core/proto/gen/controlplane/v1;controlplanev1b\x06proto3"
 
@@ -170,19 +265,22 @@ func file_controlplane_v1_query_plan_proto_rawDescGZIP() []byte {
 	return file_controlplane_v1_query_plan_proto_rawDescData
 }
 
-var file_controlplane_v1_query_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_controlplane_v1_query_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_controlplane_v1_query_plan_proto_goTypes = []any{
 	(*ResolvePlanRequest)(nil),  // 0: controlplane.v1.ResolvePlanRequest
-	(*ResolvePlanResponse)(nil), // 1: controlplane.v1.ResolvePlanResponse
+	(*StorePlan)(nil),           // 1: controlplane.v1.StorePlan
+	(*ResolvePlanResponse)(nil), // 2: controlplane.v1.ResolvePlanResponse
 }
 var file_controlplane_v1_query_plan_proto_depIdxs = []int32{
-	0, // 0: controlplane.v1.QueryPlanner.ResolvePlan:input_type -> controlplane.v1.ResolvePlanRequest
-	1, // 1: controlplane.v1.QueryPlanner.ResolvePlan:output_type -> controlplane.v1.ResolvePlanResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: controlplane.v1.ResolvePlanResponse.primary:type_name -> controlplane.v1.StorePlan
+	1, // 1: controlplane.v1.ResolvePlanResponse.historical:type_name -> controlplane.v1.StorePlan
+	0, // 2: controlplane.v1.QueryPlanner.ResolvePlan:input_type -> controlplane.v1.ResolvePlanRequest
+	2, // 3: controlplane.v1.QueryPlanner.ResolvePlan:output_type -> controlplane.v1.ResolvePlanResponse
+	3, // [3:4] is the sub-list for method output_type
+	2, // [2:3] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_controlplane_v1_query_plan_proto_init() }
@@ -196,7 +294,7 @@ func file_controlplane_v1_query_plan_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_controlplane_v1_query_plan_proto_rawDesc), len(file_controlplane_v1_query_plan_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

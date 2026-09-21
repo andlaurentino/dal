@@ -1,0 +1,44 @@
+[package]
+name = "workerd"
+version = "0.1.0"
+edition = "2021"
+
+# Requires rustc >= 1.94 (deltalake 0.22's aws-sdk/aws-smithy transitive
+# deps push the MSRV that high, well above the crate's own advertised 2021
+# edition minimum) — use a recent stable toolchain, not just "any 1.8x".
+#
+# Note on delta-rs (the `deltalake` crate): its Rust API has moved across
+# versions faster than most crates in this dependency set (CreateBuilder /
+# WriteBuilder / load_cdf() builder shapes have all changed release to
+# release, and load_cdf().build() returns a DataFusion ExecutionPlan that
+# must be .execute()'d to get a record batch stream, not a Stream itself).
+# This was verified to compile (`cargo check`) against exactly the versions
+# below with rustc 1.98 — re-verify src/kafkalake.rs and
+# src/lakepostgres.rs's builder calls if these versions move.
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12"
+prost = "0.13"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rdkafka = { version = "0.36", features = ["tokio", "cmake-build"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+deltalake = { version = "0.22", features = ["s3", "datafusion"] }
+datafusion = "43"
+object_store = { version = "0.11", features = ["aws"] }
+arrow-array = "53"
+arrow-schema = "53"
+anyhow = "1"
+thiserror = "1"
+futures = "0.3"
+chrono = { version = "0.4", features = ["clock"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+cron = "0.12"
+bytes = "1"
+futures-util = "0.3"
+
+[build-dependencies]
+tonic-build = "0.12"

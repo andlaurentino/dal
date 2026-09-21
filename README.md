@@ -16,7 +16,7 @@ By routing data from source systems (e.g., Kafka) into query-optimized stores (e
 | Component | Responsibility |
 |---|---|
 | `controlplane` | Source of truth for resources; validates and stores them; orchestrates per-Sync workers on Kubernetes |
-| `worker` | One process per `Sync`; moves data from a source connection to a target connection (streaming or scheduled) |
+| `workerd` | Rust binary, one process per `Sync`; moves data from a source connection to a target connection — kafka→postgres, kafka→lake, or lake→postgres (streaming or scheduled) |
 | `broker` | Serves queries against named `Projection`s, resolving the current physical store/table via the control plane |
 | `web` | UI for authoring resources and running queries |
 | `core` | Shared Go library: resource types, validation, gRPC contracts |

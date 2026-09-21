@@ -30,7 +30,7 @@ export default async function QueryProjectionPage({
   const projection = await getProjection(name);
   if (!projection) notFound();
 
-  const limit = projection.spec.queryable.defaultLimit || 50;
+  const limit = projection.spec.queryable.defaultLimit || 20;
   const page = Math.max(1, Number(pageParam) || 1);
   const offset = (page - 1) * limit;
 
@@ -40,7 +40,14 @@ export default async function QueryProjectionPage({
     <div className="grid gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
-        <span className="text-sm text-muted-foreground">{projection.spec.queryable.table}</span>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {result.ok && result.data.tiered && (
+            <span className="rounded-full border border-border px-2 py-0.5 text-xs">
+              postgres + lake
+            </span>
+          )}
+          <span>{projection.spec.queryable.table}</span>
+        </div>
       </div>
 
       {!result.ok ? (

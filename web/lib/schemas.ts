@@ -33,15 +33,24 @@ const syncFieldMappingSchema = z.object({
   type: z.string().min(1, "Type is required"),
 });
 
+// Source/target shape depends on the referenced Connection's type: a kafka
+// source sets topic (path empty); a datalake source sets path+checkpointPath
+// (topic empty) — see core/api/v1alpha1/sync_types.go. This form doesn't
+// know the selected Connection's type ahead of submission, so it collects
+// both and lets the exactly-one-of checks below (mirroring ValidateSync)
+// catch the mismatch.
 export const syncSchema = z
   .object({
     source: z.object({
       connectionRef: z.string().min(1, "Source connection is required"),
-      topic: z.string().min(1, "Topic is required"),
+      topic: z.string().optional(),
+      path: z.string().optional(),
+      checkpointPath: z.string().optional(),
     }),
     target: z.object({
       connectionRef: z.string().min(1, "Target connection is required"),
-      table: z.string().min(1, "Table is required"),
+      table: z.string().optional(),
+      path: z.string().optional(),
     }),
     mode: z.enum(["streaming", "scheduled"]),
     replication: z.enum(["delta", "snapshot"]),
@@ -55,6 +64,18 @@ export const syncSchema = z
   .refine((v) => v.mode !== "scheduled" || !!v.schedule, {
     message: "Schedule is required when mode is scheduled",
     path: ["schedule"],
+  })
+  .refine((v) => !!v.source.topic !== !!v.source.path, {
+    message: "Exactly one of topic (kafka source) or path (datalake source) is required",
+    path: ["source", "topic"],
+  })
+  .refine((v) => !v.source.path || !!v.source.checkpointPath, {
+    message: "Checkpoint path is required when source path is set",
+    path: ["source", "checkpointPath"],
+  })
+  .refine((v) => !!v.target.table !== !!v.target.path, {
+    message: "Exactly one of table (postgres target) or path (datalake target) is required",
+    path: ["target", "table"],
   });
 
 export type SyncFormValues = z.infer<typeof syncSchema>;

@@ -8,7 +8,7 @@ import (
 
 func readExample(t *testing.T, name string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "examples", "kafka-to-postgres", name))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "examples", "tiered-events", name))
 	if err != nil {
 		t.Fatalf("reading example %s: %v", name, err)
 	}
@@ -29,7 +29,7 @@ func TestDecodeConnection_Valid(t *testing.T) {
 }
 
 func TestDecodeSync_Valid(t *testing.T) {
-	raw := readExample(t, "sync.yaml")
+	raw := readExample(t, "sync-postgres.yaml")
 	s, err := DecodeSync(raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -37,15 +37,18 @@ func TestDecodeSync_Valid(t *testing.T) {
 	if s.Spec.Source.Topic != "user-events" {
 		t.Fatalf("expected topic user-events, got %q", s.Spec.Source.Topic)
 	}
+	if s.Spec.Retention == nil || s.Spec.Retention.Days != 7 {
+		t.Fatalf("expected 7-day retention, got %+v", s.Spec.Retention)
+	}
 }
 
 func TestDecodeProjection_Valid(t *testing.T) {
-	raw := readExample(t, "projection.yaml")
+	raw := readExample(t, "projection-postgres.yaml")
 	p, err := DecodeProjection(raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(p.Spec.Sources) != 1 || p.Spec.Sources[0].SyncRef != "events-to-warehouse" {
+	if len(p.Spec.Sources) != 1 || p.Spec.Sources[0].SyncRef != "events-to-postgres" {
 		t.Fatalf("unexpected sources: %+v", p.Spec.Sources)
 	}
 }

@@ -23,32 +23,59 @@ setup: ## One-time local dev setup: toolchain checks, proto codegen, deps for ev
 	}
 	@test -x "$(GOBIN)/protoc-gen-go" || go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	@test -x "$(GOBIN)/protoc-gen-go-grpc" || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	@command -v cargo >/dev/null 2>&1 || { \
+		echo "cargo not found. Install Rust first, e.g.: https://rustup.rs (workerd needs rustc >= 1.94)"; exit 1; \
+	}
+	@command -v cmake >/dev/null 2>&1 || { \
+		echo "cmake not found (needed to build workerd's vendored librdkafka), e.g.: brew install cmake"; exit 1; \
+	}
 	$(MAKE) proto
 	$(MAKE) tidy
+	cd workerd && cargo fetch
 	cd web && npm install
 
 .PHONY: up
-up: ## Build images and apply manifests to Rancher Desktop's k8s (redis, kafka, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned)
+up: ## Build images and apply manifests to Rancher Desktop's k8s (redis, kafka, minio, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned)
 	$(DOCKER) build -f controlplane/Dockerfile -t dal-controlplane:latest .
 	$(DOCKER) build -f broker/Dockerfile -t dal-broker:latest .
+	$(DOCKER) build -f workerd/Dockerfile -t dal-workerd:latest .
 	$(DOCKER) build -f web/Dockerfile -t dal-web:latest web
 	$(KUBECTL) create configmap postgres-init --from-file=infra/postgres/init --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) apply -f infra/k8s/
-	$(KUBECTL) rollout status deployment/redis deployment/kafka deployment/postgres deployment/controlplane deployment/broker deployment/web --timeout=180s
+	$(KUBECTL) rollout status deployment/redis deployment/kafka deployment/minio deployment/postgres deployment/controlplane deployment/broker deployment/web --timeout=180s
+	$(KUBECTL) apply -f infra/datalake/bucket-init-job.yaml
+	$(KUBECTL) wait --for=condition=complete job/datalake-bucket-init --timeout=60s
 
 .PHONY: down
 down: ## Delete the stack from Kubernetes (add ARGS=--all to also drop PVC-stored data)
+	$(KUBECTL) delete -f infra/datalake/bucket-init-job.yaml --ignore-not-found
 	$(KUBECTL) delete -f infra/k8s/ --ignore-not-found
 	$(KUBECTL) delete configmap postgres-init --ignore-not-found
-	@if [ "$(ARGS)" = "--all" ]; then $(KUBECTL) delete pvc redis-data kafka-data postgres-data --ignore-not-found; fi
+	@if [ "$(ARGS)" = "--all" ]; then $(KUBECTL) delete pvc redis-data kafka-data minio-data postgres-data --ignore-not-found; fi
 
 .PHONY: logs
 logs: ## Tail logs from every DAL-managed pod (base services + per-Sync workers); use ARGS=sync=<name> to follow one worker
-	$(KUBECTL) logs -f -l 'app in (redis,kafka,postgres,controlplane,broker,web,dal-worker)' --all-containers --prefix --max-log-requests=20
+	$(KUBECTL) logs -f -l 'app in (redis,kafka,minio,postgres,controlplane,broker,web,dal-worker)' --all-containers --prefix --max-log-requests=20
 
 .PHONY: run-producer
 run-producer: ## Run the standalone event producer against Kafka's NodePort (localhost:30920); pass extra flags via ARGS, e.g. ARGS="--topic=user-events --interval=500ms"
 	cd tools/producer && GOWORK=off go run ./cmd/producer --brokers=localhost:30920 $(ARGS)
+
+CONTROLPLANE_URL ?= http://localhost:30800
+
+.PHONY: apply-examples
+apply-examples: ## POST every examples/<dir> resource to controlplane's REST API (connections, then syncs, then projections); pass ARGS=<dir> to apply just one, e.g. ARGS=tiered-events
+	@dirs="$(ARGS)"; \
+	if [ -z "$$dirs" ]; then dirs=$$(ls examples); fi; \
+	for d in $$dirs; do \
+		echo "==> examples/$$d"; \
+		for f in examples/$$d/connection-*.yaml examples/$$d/sync.yaml examples/$$d/sync-*.yaml examples/$$d/projection.yaml examples/$$d/projection-*.yaml; do \
+			[ -f "$$f" ] || continue; \
+			printf '  applying %s ... ' "$$f"; \
+			body=$$(curl -sS -o /tmp/dal-apply-response -w '%{http_code}' -X POST --data-binary @"$$f" "$(CONTROLPLANE_URL)/api/v1alpha1/apply"); \
+			if [ "$$body" = "200" ]; then echo "ok"; else echo "FAILED ($$body)"; cat /tmp/dal-apply-response; echo; exit 1; fi; \
+		done; \
+	done
 
 .PHONY: proto
 proto:
@@ -63,12 +90,11 @@ proto:
 test:
 	cd core && go test ./...
 	cd controlplane && go test ./...
-	cd worker && go test ./...
 	cd broker && go test ./...
+	cd workerd && cargo test
 
 .PHONY: tidy
 tidy:
 	cd core && go mod tidy
 	cd controlplane && go mod tidy
-	cd worker && go mod tidy
 	cd broker && go mod tidy

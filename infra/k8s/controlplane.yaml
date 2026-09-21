@@ -47,7 +47,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - { name: REDIS_ADDR, value: "redis:6379" }
-            - { name: WORKER_IMAGE, value: "dal-controlplane:latest" }
+            - { name: WORKER_IMAGE, value: "dal-workerd:latest" }
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef: { fieldPath: metadata.namespace }

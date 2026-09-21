@@ -37,18 +37,20 @@ export interface SyncFieldMapping {
 }
 
 export interface SyncSpec {
-  source: { connectionRef: string; topic: string };
-  target: { connectionRef: string; table: string };
+  source: { connectionRef: string; topic?: string; path?: string; checkpointPath?: string };
+  target: { connectionRef: string; table?: string; path?: string };
   mode: "streaming" | "scheduled";
   replication: "delta" | "snapshot";
   schedule?: string;
   mapping: { keyField: string; schema: SyncFieldMapping[] };
   consumerGroup?: string;
+  retention?: { days: number; timestampColumn: string };
 }
 
 export interface ProjectionSpec {
   sources: { syncRef: string; maxStalenessSeconds?: number }[];
   queryable: { table: string; defaultLimit?: number };
+  tiering?: { recentSyncRef: string; historicalSyncRef: string };
 }
 
 // Resource<T> mirrors httpapi.okResponse: the decoded spec plus the raw YAML

@@ -1,0 +1,10 @@
+apiVersion: dal.io/v1alpha1
+kind: Connection
+metadata:
+  name: minio-lake
+spec:
+  type: datalake
+  datalake:
+    endpoint: "http://minio:9000"
+    bucket: dal-lake
+    credentialsRef: ""

@@ -5,7 +5,7 @@ export default async function QueryLayout({ children }: { children: React.ReactN
   const projections = await listProjections();
 
   return (
-    <div className="grid grid-cols-[220px_1fr] gap-8">
+    <div className="grid grid-cols-[220px_1fr] items-start gap-8">
       <aside className="grid gap-4">
         <h2 className="px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           Projections

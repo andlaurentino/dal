@@ -9,7 +9,7 @@ export default function QuerySidebar({ names }: { names: string[] }) {
   const pathname = usePathname();
 
   return (
-    <nav className="grid gap-1">
+    <nav className="grid content-start gap-1">
       {names.length === 0 && (
         <p className="px-3 py-1.5 text-sm text-muted-foreground">No projections yet.</p>
       )}

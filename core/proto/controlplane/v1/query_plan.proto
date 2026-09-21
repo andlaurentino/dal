@@ -5,11 +5,13 @@ package controlplane.v1;
 option go_package = "github.com/andersonlaurentino/dal-core/proto/gen/controlplane/v1;controlplanev1";
 
 // QueryPlanner is called by the broker to resolve which store/connection/
-// table should answer a query against a named Projection. This slice always
-// resolves to the single Postgres target of the Kafka->Postgres sync; the
-// request/response shape leaves room for future multi-store tiering
-// (time_range/filters on the request, ranked candidates on the response)
-// without breaking the contract.
+// table should answer a query against a named Projection. For a plain
+// (untiered) Projection, only `primary` is set — the single Postgres or
+// datalake target of its one Sync. For a tiered Projection (spec.tiering),
+// both `primary` (the retention-limited recent source, always postgres
+// today) and `historical` (the full-history source, always datalake today)
+// are set, along with the retention window broker needs to decide which
+// store answers which page.
 service QueryPlanner {
   rpc ResolvePlan(ResolvePlanRequest) returns (ResolvePlanResponse);
 }
@@ -18,10 +20,21 @@ message ResolvePlanRequest {
   string projection_name = 1;
 }
 
+// StorePlan is everything broker needs to execute a read against one
+// resolved store.
+message StorePlan {
+  string store_type     = 1; // "postgres" | "datalake"
+  string connection_ref = 2; // Connection to use
+  string target          = 3; // table name (postgres) or lake path (datalake)
+  string dsn              = 4; // resolved connection string, postgres only
+  string endpoint          = 5; // MinIO endpoint, datalake only
+  string bucket             = 6; // bucket name, datalake only
+}
+
 message ResolvePlanResponse {
-  string store_type = 1;        // "postgres" (only value this slice)
-  string connection_ref = 2;    // Connection to use
-  string target = 3;            // table name to query
-  int64  staleness_seconds = 4; // observed, informational
-  string dsn = 5;                // resolved connection string for store_type "postgres"
+  StorePlan primary           = 1; // always set
+  StorePlan historical         = 2; // set only for a tiered projection
+  string    cutover_column      = 3; // set only for a tiered projection
+  int64     retention_days       = 4; // set only for a tiered projection
+  int64     staleness_seconds     = 5; // observed, informational
 }

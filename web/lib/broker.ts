@@ -15,6 +15,9 @@ export interface QueryResult {
   total: number;
   limit: number;
   offset: number;
+  // true when this page was answered by stitching a tiered projection's
+  // postgres (recent) and lake (historical) sources together.
+  tiered?: boolean;
 }
 
 export type QueryResponse = { ok: true; data: QueryResult } | { ok: false; error: string };

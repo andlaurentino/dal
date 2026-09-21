@@ -81,11 +81,20 @@ func ValidateSync(s *Sync) error {
 	if s.Metadata.Name == "" {
 		return fmt.Errorf("metadata.name is required")
 	}
-	if s.Spec.Source.ConnectionRef == "" || s.Spec.Source.Topic == "" {
-		return fmt.Errorf("spec.source.connectionRef and spec.source.topic are required")
+	if s.Spec.Source.ConnectionRef == "" {
+		return fmt.Errorf("spec.source.connectionRef is required")
 	}
-	if s.Spec.Target.ConnectionRef == "" || s.Spec.Target.Table == "" {
-		return fmt.Errorf("spec.target.connectionRef and spec.target.table are required")
+	if (s.Spec.Source.Topic == "") == (s.Spec.Source.Path == "") {
+		return fmt.Errorf("spec.source: exactly one of topic or path is required")
+	}
+	if s.Spec.Source.Path != "" && s.Spec.Source.CheckpointPath == "" {
+		return fmt.Errorf("spec.source.checkpointPath is required when spec.source.path is set")
+	}
+	if s.Spec.Target.ConnectionRef == "" {
+		return fmt.Errorf("spec.target.connectionRef is required")
+	}
+	if (s.Spec.Target.Table == "") == (s.Spec.Target.Path == "") {
+		return fmt.Errorf("spec.target: exactly one of table or path is required")
 	}
 
 	switch s.Spec.Mode {
@@ -119,6 +128,28 @@ func ValidateSync(s *Sync) error {
 		}
 	}
 
+	if r := s.Spec.Retention; r != nil {
+		if r.Days <= 0 {
+			return fmt.Errorf("spec.retention.days must be positive")
+		}
+		if r.TimestampColumn == "" {
+			return fmt.Errorf("spec.retention.timestampColumn is required")
+		}
+		var found bool
+		for _, f := range s.Spec.Mapping.Schema {
+			if f.Column == r.TimestampColumn {
+				found = true
+				if f.Type != "timestamptz" && f.Type != "timestamp" {
+					return fmt.Errorf("spec.retention.timestampColumn %q must map to a timestamptz/timestamp column, got %q", r.TimestampColumn, f.Type)
+				}
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("spec.retention.timestampColumn %q does not match any spec.mapping.schema[].column", r.TimestampColumn)
+		}
+	}
+
 	return nil
 }
 
@@ -140,5 +171,30 @@ func ValidateProjection(p *Projection) error {
 	if p.Spec.Queryable.Table == "" {
 		return fmt.Errorf("spec.queryable.table is required")
 	}
+
+	if t := p.Spec.Tiering; t != nil {
+		if t.RecentSyncRef == "" || t.HistoricalSyncRef == "" {
+			return fmt.Errorf("spec.tiering.recentSyncRef and spec.tiering.historicalSyncRef are both required")
+		}
+		if t.RecentSyncRef == t.HistoricalSyncRef {
+			return fmt.Errorf("spec.tiering.recentSyncRef and spec.tiering.historicalSyncRef must be different syncs")
+		}
+		var haveRecent, haveHistorical bool
+		for _, src := range p.Spec.Sources {
+			if src.SyncRef == t.RecentSyncRef {
+				haveRecent = true
+			}
+			if src.SyncRef == t.HistoricalSyncRef {
+				haveHistorical = true
+			}
+		}
+		if !haveRecent {
+			return fmt.Errorf("spec.tiering.recentSyncRef %q must also appear in spec.sources", t.RecentSyncRef)
+		}
+		if !haveHistorical {
+			return fmt.Errorf("spec.tiering.historicalSyncRef %q must also appear in spec.sources", t.HistoricalSyncRef)
+		}
+	}
+
 	return nil
 }

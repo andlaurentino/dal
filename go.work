@@ -4,5 +4,4 @@ use (
 	./broker
 	./controlplane
 	./core
-	./worker
 )
