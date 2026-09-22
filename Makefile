@@ -34,12 +34,15 @@ setup: ## One-time local dev setup: toolchain checks, proto codegen, deps for ev
 	cd workerd && cargo fetch
 	cd web && npm install
 
-.PHONY: up
-up: ## Build images and apply manifests to Rancher Desktop's k8s (redis, kafka, minio, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned)
+.PHONY: build
+build: ## Build the latest images (controlplane, broker, workerd, web)
 	$(DOCKER) build -f controlplane/Dockerfile -t dal-controlplane:latest .
 	$(DOCKER) build -f broker/Dockerfile -t dal-broker:latest .
 	$(DOCKER) build -f workerd/Dockerfile -t dal-workerd:latest .
 	$(DOCKER) build -f web/Dockerfile -t dal-web:latest web
+
+.PHONY: up
+up: ## Deploy manifests to Rancher Desktop's k8s (redis, kafka, minio, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned); images must already exist — run `make build` first
 	$(KUBECTL) create configmap postgres-init --from-file=infra/postgres/init --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) apply -f infra/k8s/
 	$(KUBECTL) rollout status deployment/redis deployment/kafka deployment/minio deployment/postgres deployment/controlplane deployment/broker deployment/web --timeout=180s
@@ -47,7 +50,8 @@ up: ## Build images and apply manifests to Rancher Desktop's k8s (redis, kafka, 
 	$(KUBECTL) wait --for=condition=complete job/datalake-bucket-init --timeout=60s
 
 .PHONY: down
-down: ## Delete the stack from Kubernetes (add ARGS=--all to also drop PVC-stored data)
+down: ## Delete the stack from Kubernetes, including per-Sync worker ReplicaSets (add ARGS=--all to also drop PVC-stored data)
+	$(KUBECTL) delete rs -l app=dal-worker --ignore-not-found
 	$(KUBECTL) delete -f infra/datalake/bucket-init-job.yaml --ignore-not-found
 	$(KUBECTL) delete -f infra/k8s/ --ignore-not-found
 	$(KUBECTL) delete configmap postgres-init --ignore-not-found
@@ -76,6 +80,30 @@ apply-examples: ## POST every examples/<dir> resource to controlplane's REST API
 			if [ "$$body" = "200" ]; then echo "ok"; else echo "FAILED ($$body)"; cat /tmp/dal-apply-response; echo; exit 1; fi; \
 		done; \
 	done
+
+.PHONY: apply-tiered-seed
+apply-tiered-seed: ## Apply the tiered-events example and seed historical data into the lake (postgres ends up recent-only after a forced prune, lake keeps full history)
+	$(MAKE) apply-examples ARGS=tiered-events
+	$(MAKE) seed-tiered-events
+
+.PHONY: seed-tiered-events
+seed-tiered-events: ## Publish backdated + recent user-events so events-to-postgres/events-to-lake visibly diverge (postgres recent-only, lake full history); run via apply-tiered-seed
+	@echo "==> seeding historical + recent data for tiered-events"
+	@$(KUBECTL) exec deploy/kafka -- rpk topic create user-events --brokers localhost:9092 >/dev/null 2>&1 || true
+	cd tools/producer && GOWORK=off go run ./cmd/producer --brokers=localhost:30920 --topic=user-events --count=200 --interval=0 --backdate=720h --backdate-jitter=1440h
+	cd tools/producer && GOWORK=off go run ./cmd/producer --brokers=localhost:30920 --topic=user-events --count=30 --interval=0
+	@echo "  waiting for the events-to-postgres worker pod so its retention prune can be forced to run immediately..."
+	@for i in $$(seq 1 15); do \
+		pod=$$($(KUBECTL) get pods -l sync=events-to-postgres -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+		[ -n "$$pod" ] && break; \
+		sleep 1; \
+	done; \
+	if [ -n "$$pod" ]; then \
+		echo "  restarting $$pod to force an immediate retention prune"; \
+		$(KUBECTL) delete pod -l sync=events-to-postgres --wait=false; \
+	else \
+		echo "  warning: no events-to-postgres worker pod found yet — skipping forced prune (it'll prune on its normal hourly schedule)"; \
+	fi
 
 .PHONY: proto
 proto:

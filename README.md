@@ -27,8 +27,12 @@ By routing data from source systems (e.g., Kafka) into query-optimized stores (e
 Requires a Kubernetes cluster (this repo targets Rancher Desktop's built-in cluster, context `rancher-desktop`).
 
 ```
-make up             # build images and deploy the full stack
-make run-producer   # generate synthetic Kafka events
-make logs           # tail logs from every DAL-managed pod
-make down           # tear the stack down
+make build              # build the latest images (controlplane, broker, workerd, web)
+make up                 # deploy manifests to Kubernetes (images must already exist — run make build first)
+make apply-tiered-seed  # apply the tiered-events example and seed historical data into the lake
+make run-producer       # generate synthetic Kafka events; pass flags via ARGS, e.g. ARGS="--topic=user-events --interval=500ms"
+make logs               # tail logs from every DAL-managed pod
+make down               # tear the stack down, including per-Sync worker pods (add ARGS=--all to also drop PVC-stored data)
 ```
+
+A typical first run is `make build && make up && make apply-tiered-seed`. `apply-tiered-seed` applies [`examples/tiered-events`](examples/tiered-events) and publishes both recent and backdated events so Postgres (7-day retention) and the lake (full history) end up visibly different — right after it finishes you can open `web` (`http://localhost:30300`) and query the `events-recent`, `events-history`, and `events-combined` projections to see the tiered postgres/lake storage feature in action.

@@ -31,10 +31,11 @@ func main() {
 	brokers := flag.String("brokers", "localhost:9092", "comma-separated Kafka broker addresses")
 	topic := flag.String("topic", "user-events", "Kafka topic to publish to")
 	count := flag.Int("count", 0, "number of events to publish (0 = run forever)")
-	interval := flag.Duration("interval", time.Second, "delay between published events")
+	interval := flag.Duration("interval", time.Second, "delay between published events; 0 publishes as fast as possible in batches of --batch-size")
 	users := flag.Int("users", 5, "number of distinct synthetic user IDs to cycle through")
 	backdate := flag.Duration("backdate", 0, "base age applied to every published event's occurred_at (e.g. 720h for 30 days ago); for seeding historical/pre-retention test data")
 	backdateJitter := flag.Duration("backdate-jitter", 0, "additional random age in [0, backdate-jitter) applied on top of --backdate, so a single load job spreads timestamps across a range instead of one instant")
+	batchSize := flag.Int("batch-size", 500, "when --interval=0, number of events buffered in memory before a single bulk write to Kafka (ignored when --interval>0, which always writes one event at a time)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -43,10 +44,35 @@ func main() {
 		Addr:     kafka.TCP(strings.Split(*brokers, ",")...),
 		Topic:    *topic,
 		Balancer: &kafka.LeastBytes{},
+		// kafka-go's Writer defaults BatchTimeout to 1s: a batch with fewer
+		// than BatchSize messages sits idle until that timeout elapses
+		// before flushing. Publishing one message at a time (the
+		// --interval>0 path) never reaches the default BatchSize (100), so
+		// every write silently stalled for ~1s regardless of --interval —
+		// this was the actual bottleneck, not the sleep between events.
+		BatchTimeout: 10 * time.Millisecond,
 	}
 	defer writer.Close()
 
 	ctx := context.Background()
+	var pendingMsgs []kafka.Message
+	var pendingEvts []event
+
+	flush := func() {
+		if len(pendingMsgs) == 0 {
+			return
+		}
+		if err := writer.WriteMessages(ctx, pendingMsgs...); err != nil {
+			log.Error("failed to publish batch", "size", len(pendingMsgs), "err", err)
+			os.Exit(1)
+		}
+		for _, evt := range pendingEvts {
+			log.Info("published event", "event_id", evt.EventID, "user_id", evt.UserID, "event_type", evt.EventType)
+		}
+		pendingMsgs = pendingMsgs[:0]
+		pendingEvts = pendingEvts[:0]
+	}
+
 	for i := 0; *count == 0 || i < *count; i++ {
 		age := *backdate
 		if *backdateJitter > 0 {
@@ -64,14 +90,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := writer.WriteMessages(ctx, kafka.Message{Key: []byte(evt.EventID), Value: body}); err != nil {
-			log.Error("failed to publish event", "err", err)
-			os.Exit(1)
-		}
-		log.Info("published event", "event_id", evt.EventID, "user_id", evt.UserID, "event_type", evt.EventType)
+		pendingMsgs = append(pendingMsgs, kafka.Message{Key: []byte(evt.EventID), Value: body})
+		pendingEvts = append(pendingEvts, evt)
 
 		if *interval > 0 {
+			flush()
 			time.Sleep(*interval)
+		} else if len(pendingMsgs) >= *batchSize {
+			flush()
 		}
 	}
+	flush()
 }
