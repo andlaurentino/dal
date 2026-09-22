@@ -8,8 +8,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -22,20 +24,31 @@ import (
 const (
 	defaultLimit = 20
 	maxLimit     = 500
-
-	minioAccessKeyID     = "dalminio"
-	minioSecretAccessKey = "dalminio123"
 )
 
 type Handler struct {
-	planner  *grpcclient.Client
-	postgres *postgres.Executor
-	lake     *lake.Executor
-	log      *slog.Logger
+	planner       *grpcclient.Client
+	postgres      *postgres.Executor
+	lake          *lake.Executor
+	s3AccessKeyID string
+	s3SecretKey   string
+	log           *slog.Logger
 }
 
-func New(planner *grpcclient.Client, log *slog.Logger) *Handler {
-	return &Handler{planner: planner, postgres: postgres.New(), lake: lake.New(), log: log}
+func New(planner *grpcclient.Client, log *slog.Logger) (*Handler, error) {
+	accessKey := os.Getenv("S3_ACCESS_KEY")
+	secretKey := os.Getenv("S3_SECRET_KEY")
+	if accessKey == "" || secretKey == "" {
+		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY must both be set")
+	}
+	return &Handler{
+		planner:       planner,
+		postgres:      postgres.New(),
+		lake:          lake.New(),
+		s3AccessKeyID: accessKey,
+		s3SecretKey:   secretKey,
+		log:           log,
+	}, nil
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {
@@ -115,8 +128,8 @@ func (h *Handler) handleTieredQuery(w http.ResponseWriter, ctx context.Context, 
 	lakeCfg := lake.Config{
 		Endpoint:        historical.GetEndpoint(),
 		Bucket:          historical.GetBucket(),
-		AccessKeyID:     minioAccessKeyID,
-		SecretAccessKey: minioSecretAccessKey,
+		AccessKeyID:     h.s3AccessKeyID,
+		SecretAccessKey: h.s3SecretKey,
 	}
 	lakeColumns, lakeRows, lakeOlderTotal, err := h.lake.Query(ctx, lakeCfg, historical.GetTarget(), cutoverColumn, &cutoverBefore, remaining, lakeOffset)
 	if err != nil {
@@ -145,8 +158,8 @@ func (h *Handler) queryStore(ctx context.Context, sp *controlplanev1.StorePlan, 
 		cfg := lake.Config{
 			Endpoint:        sp.GetEndpoint(),
 			Bucket:          sp.GetBucket(),
-			AccessKeyID:     minioAccessKeyID,
-			SecretAccessKey: minioSecretAccessKey,
+			AccessKeyID:     h.s3AccessKeyID,
+			SecretAccessKey: h.s3SecretKey,
 		}
 		return h.lake.Query(ctx, cfg, sp.GetTarget(), orderBy, nil, limit, offset)
 	default:

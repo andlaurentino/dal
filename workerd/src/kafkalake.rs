@@ -10,7 +10,8 @@
 //! NOTE: delta-rs's Rust API (CreateBuilder/DeltaOps/WriteBuilder shapes)
 //! has churned across versions faster than this dependency set's other
 //! crates — verify these calls against the exact `deltalake` version
-//! pinned in Cargo.toml the first time this builds against a real MinIO.
+//! pinned in Cargo.toml the first time this builds against a real RustFS
+//! deployment.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ use tracing::{error, warn};
 
 use crate::heartbeat::Client as HeartbeatClient;
 use crate::mapping::{extract_values, ColumnValue};
+use crate::s3config::storage_options_for;
 use crate::types::{ConnectionSpec, ConnectionType, SyncFieldMapping, SyncMode, SyncReplication, SyncSpec};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -62,7 +64,7 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     let lake = cfg.target.datalake.as_ref().unwrap();
     let table_uri = format!("s3://{}/{}", lake.bucket, cfg.sync.target.path.trim_matches('/'));
-    let storage_options = storage_options_for(&lake.endpoint);
+    let storage_options = storage_options_for(&lake.endpoint)?;
 
     let mut table = open_or_create_table(&table_uri, &storage_options, &cfg.sync.mapping.schema).await?;
 
@@ -113,24 +115,6 @@ pub async fn run(cfg: Config) -> Result<()> {
             }
         }
     }
-}
-
-fn storage_options_for(endpoint: &str) -> HashMap<String, String> {
-    let mut opts = HashMap::new();
-    opts.insert("AWS_ENDPOINT_URL".to_string(), endpoint.to_string());
-    // MinIO defaults used by infra/k8s/minio.yaml; override via the
-    // Connection's credentialsRef mechanism once a secrets backend exists.
-    opts.insert("AWS_ACCESS_KEY_ID".to_string(), "dalminio".to_string());
-    opts.insert("AWS_SECRET_ACCESS_KEY".to_string(), "dalminio123".to_string());
-    opts.insert("AWS_ALLOW_HTTP".to_string(), "true".to_string());
-    opts.insert("AWS_S3_ALLOW_UNSAFE_RENAME".to_string(), "true".to_string());
-    // Without an explicit region, object_store's S3 client falls back to
-    // its default AWS credential/region discovery chain, which includes an
-    // EC2 instance-metadata-service (IMDS) lookup that hangs/times out
-    // off-AWS (e.g. against MinIO). MinIO ignores the region value itself,
-    // but object_store still needs one set to skip that lookup entirely.
-    opts.insert("AWS_REGION".to_string(), "us-east-1".to_string());
-    opts
 }
 
 fn delta_type_for(typ: &str) -> DeltaDataType {

@@ -10,7 +10,7 @@ spec:
     connectionRef: kafka-events
     topic: user-events
   target:
-    connectionRef: minio-lake
+    connectionRef: datalake
     path: events/raw
   mode: streaming
   replication: delta

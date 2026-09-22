@@ -65,11 +65,17 @@ func main() {
 		namespace = "default"
 	}
 
+	s3CredentialsSecret := os.Getenv("S3_CREDENTIALS_SECRET")
+	if s3CredentialsSecret == "" {
+		s3CredentialsSecret = "s3-credentials"
+	}
+
 	workers := workermgr.New(clientset, st, workermgr.Config{
 		Namespace:            namespace,
 		Image:                *workerImage,
 		ControlplaneAddr:     *workerControlplaneAddr,
 		ControlplaneHTTPAddr: *workerControlplaneHTTPAddr,
+		S3CredentialsSecret:  s3CredentialsSecret,
 	}, log)
 	go workers.Start(context.Background())
 

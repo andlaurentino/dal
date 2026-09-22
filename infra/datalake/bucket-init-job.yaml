@@ -1,8 +1,11 @@
-# One-time Job that creates the shared MinIO bucket Datalake Connections
-# point at (see examples/kafka-to-lake/connection-datalake.yaml). S3 doesn't
+# One-time Job that creates the shared bucket Datalake Connections point at
+# (see examples/tiered-events/connection-datalake.yaml). S3 doesn't
 # auto-vivify buckets on PUT, so this has to run once before any kafka->lake
 # Sync can write. Re-running is safe: `mc mb --ignore-existing` no-ops if the
 # bucket is already there.
+#
+# `mc` is a generic S3 client (not MinIO-only) and works unchanged against
+# RustFS's S3 API.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,15 +18,15 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          # Same Docker Hub retirement as minio/minio above — quay.io/minio/mc
-          # is the maintained source now.
           image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
           command:
             - /bin/sh
             - -c
             - |
-              mc alias set dal http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+              mc alias set dal http://rustfs:9000 "$S3_ACCESS_KEY" "$S3_SECRET_KEY" &&
               mc mb --ignore-existing dal/dal-lake
           env:
-            - { name: MINIO_ROOT_USER, value: dalminio }
-            - { name: MINIO_ROOT_PASSWORD, value: dalminio123 }
+            - name: S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: access-key } }
+            - name: S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: secret-key } }

@@ -26,8 +26,13 @@ func main() {
 	}
 	defer planner.Close()
 
+	handler, err := httpapi.New(planner, log)
+	if err != nil {
+		log.Error("failed to initialize http api", "err", err)
+		return
+	}
 	mux := http.NewServeMux()
-	httpapi.New(planner, log).Routes(mux)
+	handler.Routes(mux)
 
 	log.Info("broker HTTP server listening", "addr", *httpAddr)
 	if err := http.ListenAndServe(*httpAddr, mux); err != nil {

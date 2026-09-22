@@ -10,9 +10,9 @@
 //!
 //! NOTE: delta-rs's CDF read API (`DeltaOps::load_cdf`) has churned across
 //! versions — verify this call against the exact `deltalake` version pinned
-//! in Cargo.toml the first time this builds against a real MinIO.
+//! in Cargo.toml the first time this builds against a real RustFS
+//! deployment.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,7 +24,6 @@ use datafusion::execution::context::TaskContext;
 use datafusion::physical_plan::ExecutionPlan;
 use deltalake::operations::DeltaOps;
 use futures_util::StreamExt;
-use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjPath;
 use object_store::ObjectStore;
 use tokio_postgres::NoTls;
@@ -32,6 +31,7 @@ use tracing::{error, warn};
 
 use crate::heartbeat::Client as HeartbeatClient;
 use crate::mapping::{build_delete_sql, build_upsert_sql, ColumnValue};
+use crate::s3config::{amazon_s3_builder, storage_options_for};
 use crate::types::{ConnectionSpec, ConnectionType, SyncReplication, SyncSpec};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -61,19 +61,9 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     let lake = cfg.source.datalake.as_ref().unwrap();
     let table_uri = format!("s3://{}/{}", lake.bucket, cfg.sync.source.path.trim_matches('/'));
-    let storage_options = storage_options_for(&lake.endpoint);
+    let storage_options = storage_options_for(&lake.endpoint)?;
 
-    let checkpoint_store = AmazonS3Builder::new()
-        .with_endpoint(&lake.endpoint)
-        .with_bucket_name(&lake.bucket)
-        .with_access_key_id("dalminio")
-        .with_secret_access_key("dalminio123")
-        .with_allow_http(true)
-        // Without an explicit region, object_store falls back to its
-        // default AWS credential/region discovery chain, which includes an
-        // EC2 instance-metadata-service (IMDS) lookup that hangs/times out
-        // off-AWS (e.g. against MinIO).
-        .with_region("us-east-1")
+    let checkpoint_store = amazon_s3_builder(&lake.endpoint, &lake.bucket)?
         .build()
         .context("building checkpoint object store client")?;
     let checkpoint_path = ObjPath::from(format!(
@@ -149,18 +139,6 @@ pub async fn run(cfg: Config) -> Result<()> {
         last_processed = current_version;
         *hb_watermark.lock().await = current_version;
     }
-}
-
-fn storage_options_for(endpoint: &str) -> HashMap<String, String> {
-    let mut opts = HashMap::new();
-    opts.insert("AWS_ENDPOINT_URL".to_string(), endpoint.to_string());
-    opts.insert("AWS_ACCESS_KEY_ID".to_string(), "dalminio".to_string());
-    opts.insert("AWS_SECRET_ACCESS_KEY".to_string(), "dalminio123".to_string());
-    opts.insert("AWS_ALLOW_HTTP".to_string(), "true".to_string());
-    // See the matching comment in kafkalake.rs::storage_options_for: without
-    // this, object_store falls back to an IMDS lookup that hangs off-AWS.
-    opts.insert("AWS_REGION".to_string(), "us-east-1".to_string());
-    opts
 }
 
 async fn read_checkpoint(store: &impl ObjectStore, path: &ObjPath) -> Result<i64> {

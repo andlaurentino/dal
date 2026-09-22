@@ -42,10 +42,10 @@ build: ## Build the latest images (controlplane, broker, workerd, web)
 	$(DOCKER) build -f web/Dockerfile -t dal-web:latest web
 
 .PHONY: up
-up: ## Deploy manifests to Rancher Desktop's k8s (redis, kafka, minio, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned); images must already exist — run `make build` first
+up: ## Deploy manifests to Rancher Desktop's k8s (redis, kafka, rustfs, postgres, controlplane, broker, web; workers are spawned per-Sync by controlplaned); images must already exist — run `make build` first
 	$(KUBECTL) create configmap postgres-init --from-file=infra/postgres/init --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) apply -f infra/k8s/
-	$(KUBECTL) rollout status deployment/redis deployment/kafka deployment/minio deployment/postgres deployment/controlplane deployment/broker deployment/web --timeout=180s
+	$(KUBECTL) rollout status deployment/redis deployment/kafka deployment/rustfs deployment/postgres deployment/controlplane deployment/broker deployment/web --timeout=180s
 	$(KUBECTL) apply -f infra/datalake/bucket-init-job.yaml
 	$(KUBECTL) wait --for=condition=complete job/datalake-bucket-init --timeout=60s
 
@@ -55,11 +55,11 @@ down: ## Delete the stack from Kubernetes, including per-Sync worker ReplicaSets
 	$(KUBECTL) delete -f infra/datalake/bucket-init-job.yaml --ignore-not-found
 	$(KUBECTL) delete -f infra/k8s/ --ignore-not-found
 	$(KUBECTL) delete configmap postgres-init --ignore-not-found
-	@if [ "$(ARGS)" = "--all" ]; then $(KUBECTL) delete pvc redis-data kafka-data minio-data postgres-data --ignore-not-found; fi
+	@if [ "$(ARGS)" = "--all" ]; then $(KUBECTL) delete pvc redis-data kafka-data rustfs-data postgres-data --ignore-not-found; fi
 
 .PHONY: logs
 logs: ## Tail logs from every DAL-managed pod (base services + per-Sync workers); use ARGS=sync=<name> to follow one worker
-	$(KUBECTL) logs -f -l 'app in (redis,kafka,minio,postgres,controlplane,broker,web,dal-worker)' --all-containers --prefix --max-log-requests=20
+	$(KUBECTL) logs -f -l 'app in (redis,kafka,rustfs,postgres,controlplane,broker,web,dal-worker)' --all-containers --prefix --max-log-requests=20
 
 .PHONY: run-producer
 run-producer: ## Run the standalone event producer against Kafka's NodePort (localhost:30920); pass extra flags via ARGS, e.g. ARGS="--topic=user-events --interval=500ms"

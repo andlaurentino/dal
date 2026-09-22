@@ -1,0 +1,88 @@
+# Single-node RustFS (S3-compatible, Apache-2.0, Rust-native — see
+# CLAUDE.md for why this replaced MinIO), backing the datalake Connection
+# type: Delta tables written/read by workerd's kafka->lake and lake->postgres
+# pipelines live here, one bucket shared across ingestions, each ingestion
+# using its own path/prefix inside it (see infra/datalake/).
+#
+# Credentials live in the s3-credentials Secret below, named generically
+# (not "rustfs-credentials") because broker/controlplane/workerd consume it
+# through plain S3_ACCESS_KEY/S3_SECRET_KEY env vars that work unchanged
+# against any S3-compatible backend — only this Deployment's container env
+# needs RustFS's own RUSTFS_ACCESS_KEY/RUSTFS_SECRET_KEY names.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-credentials
+type: Opaque
+stringData:
+  access-key: dalrustfs
+  secret-key: dalrustfs123
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rustfs-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  labels: { app: rustfs }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: rustfs }
+  template:
+    metadata:
+      labels: { app: rustfs }
+    spec:
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:1.0.0-rc.6
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: access-key } }
+            - name: RUSTFS_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: secret-key } }
+            - { name: RUSTFS_VOLUMES, value: /data }
+            - { name: RUSTFS_ADDRESS, value: ":9000" }
+            - { name: RUSTFS_CONSOLE_ADDRESS, value: ":9001" }
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /health, port: 9000 }
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: rustfs-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+spec:
+  selector: { app: rustfs }
+  ports:
+    - { name: api, port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+# NodePorts for host-side inspection (mc CLI, browser console) during local dev.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-external
+spec:
+  type: NodePort
+  selector: { app: rustfs }
+  ports:
+    - { name: api, port: 9000, targetPort: 9000, nodePort: 30900 }
+    - { name: console, port: 9001, targetPort: 9001, nodePort: 30901 }

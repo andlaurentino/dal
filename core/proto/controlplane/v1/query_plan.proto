@@ -27,7 +27,7 @@ message StorePlan {
   string connection_ref = 2; // Connection to use
   string target          = 3; // table name (postgres) or lake path (datalake)
   string dsn              = 4; // resolved connection string, postgres only
-  string endpoint          = 5; // MinIO endpoint, datalake only
+  string endpoint          = 5; // S3-compatible endpoint (RustFS in this deployment), datalake only
   string bucket             = 6; // bucket name, datalake only
 }
 

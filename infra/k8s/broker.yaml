@@ -16,6 +16,11 @@ spec:
           image: dal-broker:latest
           imagePullPolicy: IfNotPresent
           args: ["--http-addr=:8081", "--controlplane-addr=controlplane:9090"]
+          env:
+            - name: S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: access-key } }
+            - name: S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: s3-credentials, key: secret-key } }
           ports:
             - containerPort: 8081
 ---

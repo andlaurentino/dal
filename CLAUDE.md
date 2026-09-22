@@ -1,10 +1,10 @@
 # DAL — Architecture & Conventions
 
-DAL (Data Abstraction Layer) is a set of microservices (Go for `controlplane`/`broker`/`web`, Rust for `workerd`), orchestrated on Kubernetes, that move data from source systems into query-optimized stores — including an intermediate Delta Lake tier on MinIO — and serve reads back through a stable, storage-agnostic query interface. This file documents the architecture and the conventions new work in this repo must follow.
+DAL (Data Abstraction Layer) is a set of microservices (Go for `controlplane`/`broker`/`web`, Rust for `workerd`), orchestrated on Kubernetes, that move data from source systems into query-optimized stores — including an intermediate Delta Lake tier on RustFS, an S3-compatible object store — and serve reads back through a stable, storage-agnostic query interface. This file documents the architecture and the conventions new work in this repo must follow.
 
 ## Overview
 
-Users declare `Connection`, `Sync`, and `Projection` resources (YAML, CRD-style) against `controlplane`. `controlplane` validates and stores them, then reconciles a Kubernetes `ReplicaSet` per `Sync` so a dedicated `workerd` Pod moves that Sync's data continuously or on a schedule. Three Sync kinds exist, distinguished by the (source, target) Connection types: kafka→postgres, kafka→lake (Delta table on MinIO, Change Data Feed enabled), and lake→postgres (consumes that CDF). `broker` answers queries against named `Projection`s without callers ever knowing which physical store or table backs them. `web` is the UI over both.
+Users declare `Connection`, `Sync`, and `Projection` resources (YAML, CRD-style) against `controlplane`. `controlplane` validates and stores them, then reconciles a Kubernetes `ReplicaSet` per `Sync` so a dedicated `workerd` Pod moves that Sync's data continuously or on a schedule. Three Sync kinds exist, distinguished by the (source, target) Connection types: kafka→postgres, kafka→lake (Delta table on RustFS, Change Data Feed enabled), and lake→postgres (consumes that CDF). `broker` answers queries against named `Projection`s without callers ever knowing which physical store or table backs them. `web` is the UI over both.
 
 ## Components
 
@@ -24,7 +24,7 @@ Users declare `Connection`, `Sync`, and `Projection` resources (YAML, CRD-style)
 ### `broker` (`brokerd`)
 - Serves queries against named `Projection`s.
 - Asks `controlplane`'s `QueryPlanner.ResolvePlan` which physical store(s)/connection(s)/table(s) currently back a Projection.
-- Executes the resolved query via a pluggable executor (`internal/executors`): `postgres` (`jackc/pgx`) and `lake` (DuckDB via `go-duckdb`, scanning Delta tables on MinIO — CGO, hence broker's non-default `CGO_ENABLED=1` build). A plain Projection resolves to one executor; a *tiered* Projection (`spec.tiering`, see below) uses both, with `broker` stitching pages that straddle the retention cutover so pagination looks seamless.
+- Executes the resolved query via a pluggable executor (`internal/executors`): `postgres` (`jackc/pgx`) and `lake` (DuckDB via `go-duckdb`, scanning Delta tables on RustFS — CGO, hence broker's non-default `CGO_ENABLED=1` build). A plain Projection resolves to one executor; a *tiered* Projection (`spec.tiering`, see below) uses both, with `broker` stitching pages that straddle the retention cutover so pagination looks seamless.
 
 ### `web`
 - Next.js/TypeScript UI for authoring Connections/Syncs/Projections (REST → `controlplane`) and running queries (REST → `broker`).
@@ -76,12 +76,12 @@ The reason `Sync` + `Projection` + `broker` exist as separate concepts: callers 
 | `tokio-postgres` (`workerd`) / `jackc/pgx` (`broker`) | Postgres access | Native driver in each language |
 | `go-duckdb` (DuckDB) | Delta Lake reads in `broker`'s `lake` executor | No mature pure-Go Delta reader exists; DuckDB's `delta`/`httpfs` extensions read Delta tables on S3-compatible storage directly, in-process — avoids standing up a second Rust service just for reads |
 | Redis | `controlplane`'s resource store | Simple, fast KV store sufficient for resource specs + heartbeat TTLs |
-| MinIO | S3-compatible object storage backing `datalake` Connections | Self-hostable S3 API for local dev/on-prem; `workerd`'s Delta tables live here |
+| RustFS | S3-compatible object storage backing `datalake` Connections | Self-hostable S3 API for local dev/on-prem; `workerd`'s Delta tables live here. Chosen over MinIO for its Apache-2.0 license (MinIO is AGPLv3, whose copyleft obligations we'd rather avoid on a self-hosted component) and no-telemetry posture; it's Rust-native like `workerd`, though the integration itself is still over the plain S3 API/DuckDB httpfs, not a RustFS-specific crate. `DatalakeConnection{Endpoint, Bucket}` has no RustFS-specific fields, so any S3-compatible store (MinIO, real AWS S3) works as a drop-in replacement |
 | Next.js / TypeScript | `web` | UI framework for the authoring/query console |
 
 ## Good Practices / Conventions
 
-- **Hostname-based service discovery only.** Every service address is an env var or Kubernetes Service DNS name (`kafka:9092`, `postgres:5432`, `controlplane:9090`, `minio:9000`, etc.) — never hardcode an address. This is what made the docker-compose→Kubernetes migration a zero-application-code-change operation; keep it that way.
+- **Hostname-based service discovery only.** Every service address is an env var or Kubernetes Service DNS name (`kafka:9092`, `postgres:5432`, `controlplane:9090`, `rustfs:9000`, etc.) — never hardcode an address. This is what made the docker-compose→Kubernetes migration a zero-application-code-change operation; keep it that way.
 - **Validate at the resource boundary, not downstream.** New `Connection`/`Sync`/`Projection` fields go through `core/api/v1alpha1` validation before being stored, plus `controlplane/internal/validate` for anything that needs cross-resource context (e.g. which source/target Connection type pairs are valid). Don't add ad hoc validation in `workerd`, `broker`, or `web` for data that should have been rejected at apply-time.
 - **Orchestration is reconciliation, not imperative calls.** New behavior in `workermgr` should compare desired state (Syncs in the store) against actual state (ReplicaSets in the cluster) and converge — level-triggered, safe to re-run — not one-off imperative Kubernetes API calls scattered elsewhere.
 - **Keep `core` a pure shared library.** No service-specific logic, no service-specific dependencies — only types, proto contracts, and generic infrastructure helpers (`logging`, `redisutil`). It stays Go-only; `workerd` consumes the `.proto` files directly rather than `core` itself, since Go and Rust can't share generated code.
@@ -90,4 +90,4 @@ The reason `Sync` + `Projection` + `broker` exist as separate concepts: callers 
 
 ## Local Dev
 
-Run `make up` to build images and deploy the full stack to the Rancher Desktop Kubernetes cluster, and `make run-producer` to generate synthetic Kafka events against it. See the `Makefile` for the full set of targets (`down`, `logs`, `test`, `tidy`, `proto`). `make up` also builds `workerd`'s image from its own `Dockerfile` (Rust toolchain, not Go) and runs a one-time MinIO bucket-provisioning Job (`infra/datalake/bucket-init-job.yaml`).
+Run `make up` to build images and deploy the full stack to the Rancher Desktop Kubernetes cluster, and `make run-producer` to generate synthetic Kafka events against it. See the `Makefile` for the full set of targets (`down`, `logs`, `test`, `tidy`, `proto`). `make up` also builds `workerd`'s image from its own `Dockerfile` (Rust toolchain, not Go) and runs a one-time RustFS bucket-provisioning Job (`infra/datalake/bucket-init-job.yaml`).

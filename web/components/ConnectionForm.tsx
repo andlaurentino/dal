@@ -119,7 +119,7 @@ export default function ConnectionForm({
             <Input
               id="endpoint"
               name="endpoint"
-              placeholder="https://minio:9000"
+              placeholder="https://rustfs:9000"
               defaultValue={initial?.spec.datalake?.endpoint}
             />
           </Field>

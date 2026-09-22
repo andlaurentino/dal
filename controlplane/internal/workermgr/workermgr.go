@@ -32,6 +32,12 @@ type Config struct {
 	Image                string
 	ControlplaneAddr     string // gRPC address, e.g. "controlplane:9090"
 	ControlplaneHTTPAddr string // REST address, e.g. "http://controlplane:8080"
+	// S3CredentialsSecret names the k8s Secret (keys "access-key"/
+	// "secret-key") workers read S3-compatible datalake credentials from.
+	// Named generically, not after any specific backend (RustFS, MinIO,
+	// AWS S3), since it's the same two-key contract regardless of which
+	// one the datalake Connection's endpoint actually points at.
+	S3CredentialsSecret string
 }
 
 type Manager struct {
@@ -192,6 +198,26 @@ func (m *Manager) createReplicaSet(ctx context.Context, syncName string) error {
 								"--sync-id=" + syncName,
 								"--controlplane-addr=" + m.cfg.ControlplaneAddr,
 								"--controlplane-http-addr=" + m.cfg.ControlplaneHTTPAddr,
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "S3_ACCESS_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: m.cfg.S3CredentialsSecret},
+											Key:                  "access-key",
+										},
+									},
+								},
+								{
+									Name: "S3_SECRET_KEY",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: m.cfg.S3CredentialsSecret},
+											Key:                  "secret-key",
+										},
+									},
+								},
 							},
 						},
 					},

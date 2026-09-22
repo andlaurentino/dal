@@ -73,7 +73,7 @@ type StorePlan struct {
 	ConnectionRef string                 `protobuf:"bytes,2,opt,name=connection_ref,json=connectionRef,proto3" json:"connection_ref,omitempty"` // Connection to use
 	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`                                    // table name (postgres) or lake path (datalake)
 	Dsn           string                 `protobuf:"bytes,4,opt,name=dsn,proto3" json:"dsn,omitempty"`                                          // resolved connection string, postgres only
-	Endpoint      string                 `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                // MinIO endpoint, datalake only
+	Endpoint      string                 `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                // S3-compatible endpoint (RustFS in this deployment), datalake only
 	Bucket        string                 `protobuf:"bytes,6,opt,name=bucket,proto3" json:"bucket,omitempty"`                                    // bucket name, datalake only
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

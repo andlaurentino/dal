@@ -15,6 +15,7 @@ mod kafkalake;
 mod kafkapostgres;
 mod lakepostgres;
 mod mapping;
+mod s3config;
 mod types;
 
 use anyhow::{Context, Result};

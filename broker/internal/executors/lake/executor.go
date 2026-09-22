@@ -1,10 +1,11 @@
 // Package lake executes paginated, optionally time-filtered reads against a
-// Delta table on MinIO via DuckDB's httpfs/delta extensions — the read-side
-// counterpart to workerd's deltalake-crate write path, chosen because no
-// comparably mature Go Delta Lake reader exists (same reasoning that pushed
-// workerd to Rust). Kept as an in-process CGO dependency rather than a new
-// service: broker stays a single deployable, and this is a straightforward
-// read, not the write/CDF path that justified Rust for workerd.
+// Delta table on an S3-compatible store (RustFS in this deployment) via
+// DuckDB's httpfs/delta extensions — the read-side counterpart to workerd's
+// deltalake-crate write path, chosen because no comparably mature Go Delta
+// Lake reader exists (same reasoning that pushed workerd to Rust). Kept as
+// an in-process CGO dependency rather than a new service: broker stays a
+// single deployable, and this is a straightforward read, not the write/CDF
+// path that justified Rust for workerd.
 package lake
 
 import (
@@ -22,15 +23,15 @@ type Column struct {
 	Type string `json:"type"`
 }
 
-// Config identifies the MinIO-backed datalake connection to read from.
+// Config identifies the S3-compatible datalake connection to read from.
 type Config struct {
 	Endpoint string
 	Bucket   string
-	// AccessKeyID/SecretAccessKey are the hardcoded local-dev MinIO
-	// credentials (dalminio/dalminio123), matching workerd's own
-	// storage_options — reserved for a future secrets backend, same
-	// "unused (inline-only) in this slice" status as
-	// Connection.CredentialsRef elsewhere.
+	// AccessKeyID/SecretAccessKey are the S3 credentials read from the
+	// S3_ACCESS_KEY/S3_SECRET_KEY env vars (see internal/httpapi.New),
+	// matching workerd's own storage_options — reserved for a future
+	// per-Connection secrets backend, same "unused (inline-only) in this
+	// slice" status as Connection.CredentialsRef elsewhere.
 	AccessKeyID     string
 	SecretAccessKey string
 }
@@ -114,14 +115,14 @@ func (e *Executor) Query(ctx context.Context, cfg Config, path, cutoverColumn st
 }
 
 // configure installs/loads the extensions and S3 credentials this
-// connection needs to scan a Delta table on MinIO. Credentials are set via
-// DuckDB's CREATE SECRET mechanism rather than the legacy `SET s3_*`
-// session variables: delta_scan resolves credentials through delta-rs's own
-// object_store layer, which only picks them up via a secret — with the
-// legacy SET vars it silently falls back to the default AWS credential
-// chain (including an EC2 instance-metadata-service lookup that hangs/times
-// out off-AWS). DuckDB's s3_endpoint wants a bare host:port (no scheme);
-// use_ssl carries the scheme instead.
+// connection needs to scan a Delta table on the S3-compatible datalake
+// store. Credentials are set via DuckDB's CREATE SECRET mechanism rather
+// than the legacy `SET s3_*` session variables: delta_scan resolves
+// credentials through delta-rs's own object_store layer, which only picks
+// them up via a secret — with the legacy SET vars it silently falls back to
+// the default AWS credential chain (including an EC2 instance-metadata-
+// service lookup that hangs/times out off-AWS). DuckDB's s3_endpoint wants
+// a bare host:port (no scheme); use_ssl carries the scheme instead.
 func configure(ctx context.Context, conn *sql.Conn, cfg Config) error {
 	endpoint := cfg.Endpoint
 	useSSL := "false"
@@ -137,7 +138,7 @@ func configure(ctx context.Context, conn *sql.Conn, cfg Config) error {
 		"INSTALL httpfs", "LOAD httpfs",
 		"INSTALL delta", "LOAD delta",
 		fmt.Sprintf(`
-			CREATE OR REPLACE SECRET minio (
+			CREATE OR REPLACE SECRET s3 (
 				TYPE s3,
 				KEY_ID '%s',
 				SECRET '%s',
