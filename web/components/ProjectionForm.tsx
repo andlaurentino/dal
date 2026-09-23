@@ -39,7 +39,23 @@ function Field({
 
 interface SourceRow {
   syncRef: string;
-  maxStalenessSeconds?: number;
+  table: string;
+  timestampColumn?: string;
+  minAge?: string;
+  maxAge?: string;
+}
+
+function rowsFromInitial(initial?: ProjectionResource): SourceRow[] {
+  if (!initial?.spec.sources.length) {
+    return [{ syncRef: "", table: "" }];
+  }
+  return initial.spec.sources.map((s) => ({
+    syncRef: s.syncRef,
+    table: s.view.table,
+    timestampColumn: s.routing?.timestampColumn,
+    minAge: s.routing?.minAge,
+    maxAge: s.routing?.maxAge,
+  }));
 }
 
 export default function ProjectionForm({
@@ -55,10 +71,9 @@ export default function ProjectionForm({
     applyProjectionAction,
     initialFormActionState,
   );
-  const [rows, setRows] = useState<SourceRow[]>(
-    initial?.spec.sources.length ? initial.spec.sources : [{ syncRef: "" }],
-  );
+  const [rows, setRows] = useState<SourceRow[]>(rowsFromInitial(initial));
   const errors = state.fieldErrors ?? {};
+  const needsRouting = rows.length > 1;
 
   function updateRow(index: number, patch: Partial<SourceRow>) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -94,52 +109,90 @@ export default function ProjectionForm({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setRows((prev) => [...prev, { syncRef: "" }])}
+            onClick={() => setRows((prev) => [...prev, { syncRef: "", table: "" }])}
           >
             <Plus />
             Add source
           </Button>
         </div>
         {errors.sources && <p className="text-xs text-destructive">{errors.sources}</p>}
+        {needsRouting && (
+          <p className="text-xs text-muted-foreground">
+            With more than one source, each needs its own routing: a timestamp column and an
+            age window (minAge/maxAge, e.g. &quot;168h&quot;) that, together across all sources,
+            partition time with no gaps or overlaps — youngest source&apos;s minAge and oldest
+            source&apos;s maxAge stay blank.
+          </p>
+        )}
 
-        <div className="grid gap-2">
+        <div className="grid gap-3">
           {rows.map((row, i) => (
-            <div key={i} className="grid grid-cols-[1fr_180px_auto] items-center gap-2">
-              <Select
-                value={row.syncRef || undefined}
-                onValueChange={(v) => updateRow(i, { syncRef: v ?? "" })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a sync" />
-                </SelectTrigger>
-                <SelectContent>
-                  {syncNames.map((n) => (
-                    <SelectItem key={n} value={n}>
-                      {n}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                min={0}
-                placeholder="Max staleness (s)"
-                value={row.maxStalenessSeconds ?? ""}
-                onChange={(e) =>
-                  updateRow(i, {
-                    maxStalenessSeconds: e.target.value ? Number(e.target.value) : undefined,
-                  })
-                }
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={rows.length === 1}
-                onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
-              >
-                <Trash2 />
-              </Button>
+            <div key={i} className="grid gap-2 rounded-lg border border-border p-3">
+              <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                <Field label="Sync" htmlFor={`sync-${i}`}>
+                  <Select
+                    value={row.syncRef || undefined}
+                    onValueChange={(v) => updateRow(i, { syncRef: v ?? "" })}
+                  >
+                    <SelectTrigger id={`sync-${i}`} className="w-full">
+                      <SelectValue placeholder="Select a sync" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {syncNames.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Table / path" htmlFor={`table-${i}`}>
+                  <Input
+                    id={`table-${i}`}
+                    placeholder="user_events"
+                    value={row.table}
+                    onChange={(e) => updateRow(i, { table: e.target.value })}
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  disabled={rows.length === 1}
+                  onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+
+              {needsRouting && (
+                <div className="grid grid-cols-3 gap-2">
+                  <Field label="Timestamp column" htmlFor={`ts-${i}`}>
+                    <Input
+                      id={`ts-${i}`}
+                      placeholder="occurred_at"
+                      value={row.timestampColumn ?? ""}
+                      onChange={(e) => updateRow(i, { timestampColumn: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Min age (blank = youngest)" htmlFor={`minage-${i}`}>
+                    <Input
+                      id={`minage-${i}`}
+                      placeholder="168h"
+                      value={row.minAge ?? ""}
+                      onChange={(e) => updateRow(i, { minAge: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Max age (blank = oldest)" htmlFor={`maxage-${i}`}>
+                    <Input
+                      id={`maxage-${i}`}
+                      placeholder="168h"
+                      value={row.maxAge ?? ""}
+                      onChange={(e) => updateRow(i, { maxAge: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -147,25 +200,15 @@ export default function ProjectionForm({
 
       <Separator />
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Queryable table" htmlFor="table" error={errors["queryable.table"]}>
-          <Input
-            id="table"
-            name="table"
-            defaultValue={initial?.spec.queryable.table}
-            placeholder="user_events"
-          />
-        </Field>
-        <Field label="Default limit (optional)" htmlFor="defaultLimit">
-          <Input
-            id="defaultLimit"
-            name="defaultLimit"
-            type="number"
-            min={1}
-            defaultValue={initial?.spec.queryable.defaultLimit}
-          />
-        </Field>
-      </div>
+      <Field label="Default limit (optional)" htmlFor="defaultLimit">
+        <Input
+          id="defaultLimit"
+          name="defaultLimit"
+          type="number"
+          min={1}
+          defaultValue={initial?.spec.queryable.defaultLimit}
+        />
+      </Field>
 
       <div>
         <Button type="submit" disabled={pending}>

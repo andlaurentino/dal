@@ -138,18 +138,38 @@ export async function applyProjectionAction(
     return { ok: false, fieldErrors: { name: nameCheck.error.issues[0].message } };
   }
 
-  let sources: unknown[] = [];
+  let rows: {
+    syncRef: string;
+    table: string;
+    timestampColumn?: string;
+    minAge?: string;
+    maxAge?: string;
+  }[] = [];
   try {
-    sources = JSON.parse(String(formData.get("sources") ?? "[]"));
+    rows = JSON.parse(String(formData.get("sources") ?? "[]"));
   } catch {
-    sources = [];
+    rows = [];
   }
+
+  const sources = rows.map((r) => ({
+    syncRef: r.syncRef,
+    view: { table: r.table },
+    ...(rows.length > 1
+      ? {
+          routing: {
+            type: "timeRange" as const,
+            timestampColumn: r.timestampColumn ?? "",
+            minAge: r.minAge || undefined,
+            maxAge: r.maxAge || undefined,
+          },
+        }
+      : {}),
+  }));
 
   const defaultLimitRaw = String(formData.get("defaultLimit") ?? "");
   const spec = {
     sources,
     queryable: {
-      table: String(formData.get("table") ?? ""),
       defaultLimit: defaultLimitRaw || undefined,
     },
   };

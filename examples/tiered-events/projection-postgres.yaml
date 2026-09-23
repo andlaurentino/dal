@@ -6,7 +6,7 @@ metadata:
 spec:
   sources:
     - syncRef: events-to-postgres
-      maxStalenessSeconds: 30
+      view:
+        table: user_events
   queryable:
-    table: user_events
     defaultLimit: 20

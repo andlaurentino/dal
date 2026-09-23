@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/andersonlaurentino/dal-controlplane/internal/store"
 	v1alpha1 "github.com/andersonlaurentino/dal-core/api/v1alpha1"
@@ -122,72 +123,90 @@ func validateRoleFields(side string, connType v1alpha1.ConnectionType, topicOrTa
 	return nil
 }
 
-// ValidateProjection checks that every referenced Sync exists, and — for a
-// tiered projection — that the recent/historical pair is actually shaped
-// the way tiering requires (postgres-with-retention feeding the recent
-// side, datalake feeding the historical side).
+// ValidateProjection checks that every referenced Sync exists, that every
+// spec.sources[].view.columns[].source (and spec.sources[].routing's
+// timestampColumn) actually names a column that Sync's own mapping
+// produces, and — for a multi-source projection — that every source's
+// resolved (post-rename, passthrough-or-not) column set matches exactly,
+// so a stitched read returns one consistent shape regardless of which
+// source(s) answered a given page.
 func (v *Validator) ValidateProjection(ctx context.Context, p *v1alpha1.Projection) error {
 	var errs []error
+	syncs := make([]*v1alpha1.Sync, len(p.Spec.Sources))
 	for i, src := range p.Spec.Sources {
-		ok, err := v.store.Exists(ctx, store.KindSync, src.SyncRef)
+		s, err := v.getSync(ctx, src.SyncRef)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("spec.sources[%d].syncRef: %w", i, err))
 			continue
 		}
-		if !ok {
-			errs = append(errs, fmt.Errorf("spec.sources[%d].syncRef: sync %q does not exist", i, src.SyncRef))
+		syncs[i] = s
+
+		mapped := make(map[string]bool, len(s.Spec.Mapping.Schema))
+		for _, f := range s.Spec.Mapping.Schema {
+			mapped[f.Column] = true
+		}
+
+		for j, c := range src.View.Columns {
+			if !mapped[c.Source] {
+				errs = append(errs, fmt.Errorf(
+					"spec.sources[%d].view.columns[%d].source: sync %q's mapping has no column %q",
+					i, j, src.SyncRef, c.Source,
+				))
+			}
+		}
+
+		if r := src.Routing; r != nil && !mapped[r.TimestampColumn] {
+			errs = append(errs, fmt.Errorf(
+				"spec.sources[%d].routing.timestampColumn: sync %q's mapping has no column %q",
+				i, src.SyncRef, r.TimestampColumn,
+			))
 		}
 	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
 
-	if t := p.Spec.Tiering; t != nil {
-		recent, err := v.getSync(ctx, t.RecentSyncRef)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef: %w", err))
+	if len(p.Spec.Sources) < 2 {
+		return nil
+	}
+
+	var want []string
+	for i, src := range p.Spec.Sources {
+		got := resolvedColumns(src, syncs[i])
+		if want == nil {
+			want = got
+			continue
 		}
-		historical, histErr := v.getSync(ctx, t.HistoricalSyncRef)
-		if histErr != nil {
-			errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef: %w", histErr))
-		}
-
-		if err == nil && histErr == nil {
-			if recent.Spec.Retention == nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef %q must declare spec.retention", t.RecentSyncRef))
-			}
-
-			recentTgt, rErr := v.getConnection(ctx, recent.Spec.Target.ConnectionRef)
-			if rErr != nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef: %w", rErr))
-			} else if recentTgt.Spec.Type != v1alpha1.ConnectionTypePostgres {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef %q must target a postgres connection, got %q", t.RecentSyncRef, recentTgt.Spec.Type))
-			}
-
-			histTgt, hErr := v.getConnection(ctx, historical.Spec.Target.ConnectionRef)
-			if hErr != nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef: %w", hErr))
-			} else if histTgt.Spec.Type != v1alpha1.ConnectionTypeDatalake {
-				errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef %q must target a datalake connection, got %q", t.HistoricalSyncRef, histTgt.Spec.Type))
-			}
-
-			if recent.Spec.Retention != nil {
-				var haveCutoverCol bool
-				for _, f := range historical.Spec.Mapping.Schema {
-					if f.Column == recent.Spec.Retention.TimestampColumn {
-						haveCutoverCol = true
-						break
-					}
-				}
-				if !haveCutoverCol {
-					errs = append(errs, fmt.Errorf(
-						"spec.tiering.historicalSyncRef %q has no mapping column matching recentSyncRef %q's retention.timestampColumn %q",
-						t.HistoricalSyncRef, t.RecentSyncRef, recent.Spec.Retention.TimestampColumn,
-					))
-				}
-			}
+		if !slices.Equal(want, got) {
+			errs = append(errs, fmt.Errorf(
+				"spec.sources[%d]: resolved column set %v does not match an earlier source's %v — every source of a multi-source projection must expose the same columns, in the same order (passthrough sources use their sync's mapping order)",
+				i, got, want,
+			))
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+// resolvedColumns returns a source's final advertised column names, in
+// order: its own view.columns (renamed via `as`) if set, or — for
+// passthrough — every column the referenced Sync's mapping produces, in
+// mapping order.
+func resolvedColumns(src v1alpha1.ProjectionSource, s *v1alpha1.Sync) []string {
+	if len(src.View.Columns) > 0 {
+		names := make([]string, len(src.View.Columns))
+		for i, c := range src.View.Columns {
+			if c.As != "" {
+				names[i] = c.As
+			} else {
+				names[i] = c.Source
+			}
+		}
+		return names
+	}
+	names := make([]string, len(s.Spec.Mapping.Schema))
+	for i, f := range s.Spec.Mapping.Schema {
+		names[i] = f.Column
+	}
+	return names
 }

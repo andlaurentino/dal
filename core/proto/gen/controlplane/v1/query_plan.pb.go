@@ -65,6 +65,61 @@ func (x *ResolvePlanRequest) GetProjectionName() string {
 	return ""
 }
 
+// ColumnPlan is one resolved output column: read `source` from the
+// underlying store, expose it to callers as `as` (equal to `source` for
+// passthrough).
+type ColumnPlan struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Source        string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	As            string                 `protobuf:"bytes,2,opt,name=as,proto3" json:"as,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ColumnPlan) Reset() {
+	*x = ColumnPlan{}
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColumnPlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColumnPlan) ProtoMessage() {}
+
+func (x *ColumnPlan) ProtoReflect() protoreflect.Message {
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColumnPlan.ProtoReflect.Descriptor instead.
+func (*ColumnPlan) Descriptor() ([]byte, []int) {
+	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ColumnPlan) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ColumnPlan) GetAs() string {
+	if x != nil {
+		return x.As
+	}
+	return ""
+}
+
 // StorePlan is everything broker needs to execute a read against one
 // resolved store.
 type StorePlan struct {
@@ -75,13 +130,24 @@ type StorePlan struct {
 	Dsn           string                 `protobuf:"bytes,4,opt,name=dsn,proto3" json:"dsn,omitempty"`                                          // resolved connection string, postgres only
 	Endpoint      string                 `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                // S3-compatible endpoint (RustFS in this deployment), datalake only
 	Bucket        string                 `protobuf:"bytes,6,opt,name=bucket,proto3" json:"bucket,omitempty"`                                    // bucket name, datalake only
+	// order_by/min_age_seconds/max_age_seconds are only set when this
+	// StorePlan is one of several sources — how broker filters/orders this
+	// source's rows relative to the others. order_by names the timestamp
+	// column. has_min_age/has_max_age distinguish "0" from "unset" (the
+	// youngest source has no min age, the oldest has no max age).
+	OrderBy       string        `protobuf:"bytes,7,opt,name=order_by,json=orderBy,proto3" json:"order_by,omitempty"`
+	HasMinAge     bool          `protobuf:"varint,8,opt,name=has_min_age,json=hasMinAge,proto3" json:"has_min_age,omitempty"`
+	MinAgeSeconds int64         `protobuf:"varint,9,opt,name=min_age_seconds,json=minAgeSeconds,proto3" json:"min_age_seconds,omitempty"`
+	HasMaxAge     bool          `protobuf:"varint,10,opt,name=has_max_age,json=hasMaxAge,proto3" json:"has_max_age,omitempty"`
+	MaxAgeSeconds int64         `protobuf:"varint,11,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
+	Columns       []*ColumnPlan `protobuf:"bytes,12,rep,name=columns,proto3" json:"columns,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StorePlan) Reset() {
 	*x = StorePlan{}
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -93,7 +159,7 @@ func (x *StorePlan) String() string {
 func (*StorePlan) ProtoMessage() {}
 
 func (x *StorePlan) ProtoReflect() protoreflect.Message {
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[1]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -106,7 +172,7 @@ func (x *StorePlan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorePlan.ProtoReflect.Descriptor instead.
 func (*StorePlan) Descriptor() ([]byte, []int) {
-	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{1}
+	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *StorePlan) GetStoreType() string {
@@ -151,20 +217,60 @@ func (x *StorePlan) GetBucket() string {
 	return ""
 }
 
+func (x *StorePlan) GetOrderBy() string {
+	if x != nil {
+		return x.OrderBy
+	}
+	return ""
+}
+
+func (x *StorePlan) GetHasMinAge() bool {
+	if x != nil {
+		return x.HasMinAge
+	}
+	return false
+}
+
+func (x *StorePlan) GetMinAgeSeconds() int64 {
+	if x != nil {
+		return x.MinAgeSeconds
+	}
+	return 0
+}
+
+func (x *StorePlan) GetHasMaxAge() bool {
+	if x != nil {
+		return x.HasMaxAge
+	}
+	return false
+}
+
+func (x *StorePlan) GetMaxAgeSeconds() int64 {
+	if x != nil {
+		return x.MaxAgeSeconds
+	}
+	return 0
+}
+
+func (x *StorePlan) GetColumns() []*ColumnPlan {
+	if x != nil {
+		return x.Columns
+	}
+	return nil
+}
+
 type ResolvePlanResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Primary          *StorePlan             `protobuf:"bytes,1,opt,name=primary,proto3" json:"primary,omitempty"`                                            // always set
-	Historical       *StorePlan             `protobuf:"bytes,2,opt,name=historical,proto3" json:"historical,omitempty"`                                      // set only for a tiered projection
-	CutoverColumn    string                 `protobuf:"bytes,3,opt,name=cutover_column,json=cutoverColumn,proto3" json:"cutover_column,omitempty"`           // set only for a tiered projection
-	RetentionDays    int64                  `protobuf:"varint,4,opt,name=retention_days,json=retentionDays,proto3" json:"retention_days,omitempty"`          // set only for a tiered projection
-	StalenessSeconds int64                  `protobuf:"varint,5,opt,name=staleness_seconds,json=stalenessSeconds,proto3" json:"staleness_seconds,omitempty"` // observed, informational
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Sources has one entry for a single-source projection, or one entry
+	// per source (ordered youngest to oldest) for a multi-source one.
+	Sources       []*StorePlan `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ResolvePlanResponse) Reset() {
 	*x = ResolvePlanResponse{}
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -176,7 +282,7 @@ func (x *ResolvePlanResponse) String() string {
 func (*ResolvePlanResponse) ProtoMessage() {}
 
 func (x *ResolvePlanResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_controlplane_v1_query_plan_proto_msgTypes[2]
+	mi := &file_controlplane_v1_query_plan_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -189,42 +295,14 @@ func (x *ResolvePlanResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolvePlanResponse.ProtoReflect.Descriptor instead.
 func (*ResolvePlanResponse) Descriptor() ([]byte, []int) {
-	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{2}
+	return file_controlplane_v1_query_plan_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ResolvePlanResponse) GetPrimary() *StorePlan {
+func (x *ResolvePlanResponse) GetSources() []*StorePlan {
 	if x != nil {
-		return x.Primary
+		return x.Sources
 	}
 	return nil
-}
-
-func (x *ResolvePlanResponse) GetHistorical() *StorePlan {
-	if x != nil {
-		return x.Historical
-	}
-	return nil
-}
-
-func (x *ResolvePlanResponse) GetCutoverColumn() string {
-	if x != nil {
-		return x.CutoverColumn
-	}
-	return ""
-}
-
-func (x *ResolvePlanResponse) GetRetentionDays() int64 {
-	if x != nil {
-		return x.RetentionDays
-	}
-	return 0
-}
-
-func (x *ResolvePlanResponse) GetStalenessSeconds() int64 {
-	if x != nil {
-		return x.StalenessSeconds
-	}
-	return 0
 }
 
 var File_controlplane_v1_query_plan_proto protoreflect.FileDescriptor
@@ -233,7 +311,11 @@ const file_controlplane_v1_query_plan_proto_rawDesc = "" +
 	"\n" +
 	" controlplane/v1/query_plan.proto\x12\x0fcontrolplane.v1\"=\n" +
 	"\x12ResolvePlanRequest\x12'\n" +
-	"\x0fprojection_name\x18\x01 \x01(\tR\x0eprojectionName\"\xaf\x01\n" +
+	"\x0fprojection_name\x18\x01 \x01(\tR\x0eprojectionName\"4\n" +
+	"\n" +
+	"ColumnPlan\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x0e\n" +
+	"\x02as\x18\x02 \x01(\tR\x02as\"\x91\x03\n" +
 	"\tStorePlan\x12\x1d\n" +
 	"\n" +
 	"store_type\x18\x01 \x01(\tR\tstoreType\x12%\n" +
@@ -241,15 +323,16 @@ const file_controlplane_v1_query_plan_proto_rawDesc = "" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x12\x10\n" +
 	"\x03dsn\x18\x04 \x01(\tR\x03dsn\x12\x1a\n" +
 	"\bendpoint\x18\x05 \x01(\tR\bendpoint\x12\x16\n" +
-	"\x06bucket\x18\x06 \x01(\tR\x06bucket\"\x82\x02\n" +
+	"\x06bucket\x18\x06 \x01(\tR\x06bucket\x12\x19\n" +
+	"\border_by\x18\a \x01(\tR\aorderBy\x12\x1e\n" +
+	"\vhas_min_age\x18\b \x01(\bR\thasMinAge\x12&\n" +
+	"\x0fmin_age_seconds\x18\t \x01(\x03R\rminAgeSeconds\x12\x1e\n" +
+	"\vhas_max_age\x18\n" +
+	" \x01(\bR\thasMaxAge\x12&\n" +
+	"\x0fmax_age_seconds\x18\v \x01(\x03R\rmaxAgeSeconds\x125\n" +
+	"\acolumns\x18\f \x03(\v2\x1b.controlplane.v1.ColumnPlanR\acolumns\"K\n" +
 	"\x13ResolvePlanResponse\x124\n" +
-	"\aprimary\x18\x01 \x01(\v2\x1a.controlplane.v1.StorePlanR\aprimary\x12:\n" +
-	"\n" +
-	"historical\x18\x02 \x01(\v2\x1a.controlplane.v1.StorePlanR\n" +
-	"historical\x12%\n" +
-	"\x0ecutover_column\x18\x03 \x01(\tR\rcutoverColumn\x12%\n" +
-	"\x0eretention_days\x18\x04 \x01(\x03R\rretentionDays\x12+\n" +
-	"\x11staleness_seconds\x18\x05 \x01(\x03R\x10stalenessSeconds2h\n" +
+	"\asources\x18\x01 \x03(\v2\x1a.controlplane.v1.StorePlanR\asources2h\n" +
 	"\fQueryPlanner\x12X\n" +
 	"\vResolvePlan\x12#.controlplane.v1.ResolvePlanRequest\x1a$.controlplane.v1.ResolvePlanResponseBQZOgithub.com/andersonlaurentino/dal-core/proto/gen/controlplane/v1;controlplanev1b\x06proto3"
 
@@ -265,17 +348,18 @@ func file_controlplane_v1_query_plan_proto_rawDescGZIP() []byte {
 	return file_controlplane_v1_query_plan_proto_rawDescData
 }
 
-var file_controlplane_v1_query_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_controlplane_v1_query_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_controlplane_v1_query_plan_proto_goTypes = []any{
 	(*ResolvePlanRequest)(nil),  // 0: controlplane.v1.ResolvePlanRequest
-	(*StorePlan)(nil),           // 1: controlplane.v1.StorePlan
-	(*ResolvePlanResponse)(nil), // 2: controlplane.v1.ResolvePlanResponse
+	(*ColumnPlan)(nil),          // 1: controlplane.v1.ColumnPlan
+	(*StorePlan)(nil),           // 2: controlplane.v1.StorePlan
+	(*ResolvePlanResponse)(nil), // 3: controlplane.v1.ResolvePlanResponse
 }
 var file_controlplane_v1_query_plan_proto_depIdxs = []int32{
-	1, // 0: controlplane.v1.ResolvePlanResponse.primary:type_name -> controlplane.v1.StorePlan
-	1, // 1: controlplane.v1.ResolvePlanResponse.historical:type_name -> controlplane.v1.StorePlan
+	1, // 0: controlplane.v1.StorePlan.columns:type_name -> controlplane.v1.ColumnPlan
+	2, // 1: controlplane.v1.ResolvePlanResponse.sources:type_name -> controlplane.v1.StorePlan
 	0, // 2: controlplane.v1.QueryPlanner.ResolvePlan:input_type -> controlplane.v1.ResolvePlanRequest
-	2, // 3: controlplane.v1.QueryPlanner.ResolvePlan:output_type -> controlplane.v1.ResolvePlanResponse
+	3, // 3: controlplane.v1.QueryPlanner.ResolvePlan:output_type -> controlplane.v1.ResolvePlanResponse
 	3, // [3:4] is the sub-list for method output_type
 	2, // [2:3] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -294,7 +378,7 @@ func file_controlplane_v1_query_plan_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_controlplane_v1_query_plan_proto_rawDesc), len(file_controlplane_v1_query_plan_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -26,14 +26,13 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// QueryPlanner is called by the broker to resolve which store/connection/
-// table should answer a query against a named Projection. For a plain
-// (untiered) Projection, only `primary` is set — the single Postgres or
-// datalake target of its one Sync. For a tiered Projection (spec.tiering),
-// both `primary` (the retention-limited recent source, always postgres
-// today) and `historical` (the full-history source, always datalake today)
-// are set, along with the retention window broker needs to decide which
-// store answers which page.
+// QueryPlanner is called by the broker to resolve which store(s)/
+// connection(s)/table(s) should answer a query against a named Projection.
+// A single-source Projection resolves to one `sources` entry with no age
+// bounds. A multi-source Projection resolves to one entry per source,
+// ordered youngest to oldest, each carrying the age window (min_age/
+// max_age, seconds; unset means unbounded on that side) and column view
+// broker needs to route and stitch pages across them.
 type QueryPlannerClient interface {
 	ResolvePlan(ctx context.Context, in *ResolvePlanRequest, opts ...grpc.CallOption) (*ResolvePlanResponse, error)
 }
@@ -60,14 +59,13 @@ func (c *queryPlannerClient) ResolvePlan(ctx context.Context, in *ResolvePlanReq
 // All implementations must embed UnimplementedQueryPlannerServer
 // for forward compatibility.
 //
-// QueryPlanner is called by the broker to resolve which store/connection/
-// table should answer a query against a named Projection. For a plain
-// (untiered) Projection, only `primary` is set — the single Postgres or
-// datalake target of its one Sync. For a tiered Projection (spec.tiering),
-// both `primary` (the retention-limited recent source, always postgres
-// today) and `historical` (the full-history source, always datalake today)
-// are set, along with the retention window broker needs to decide which
-// store answers which page.
+// QueryPlanner is called by the broker to resolve which store(s)/
+// connection(s)/table(s) should answer a query against a named Projection.
+// A single-source Projection resolves to one `sources` entry with no age
+// bounds. A multi-source Projection resolves to one entry per source,
+// ordered youngest to oldest, each carrying the age window (min_age/
+// max_age, seconds; unset means unbounded on that side) and column view
+// broker needs to route and stitch pages across them.
 type QueryPlannerServer interface {
 	ResolvePlan(context.Context, *ResolvePlanRequest) (*ResolvePlanResponse, error)
 	mustEmbedUnimplementedQueryPlannerServer()

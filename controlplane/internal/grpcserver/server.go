@@ -58,25 +58,34 @@ func (s *Server) ResolvePlan(ctx context.Context, req *controlplanev1.ResolvePla
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
 
-	resp := &controlplanev1.ResolvePlanResponse{
-		Primary:          storePlanProto(plan.Primary),
-		StalenessSeconds: plan.StalenessSeconds,
+	sources := make([]*controlplanev1.StorePlan, len(plan.Sources))
+	for i, sp := range plan.Sources {
+		sources[i] = storePlanProto(sp)
 	}
-	if plan.Historical != nil {
-		resp.Historical = storePlanProto(*plan.Historical)
-		resp.CutoverColumn = plan.CutoverColumn
-		resp.RetentionDays = plan.RetentionDays
-	}
-	return resp, nil
+	return &controlplanev1.ResolvePlanResponse{Sources: sources}, nil
 }
 
 func storePlanProto(sp planner.StorePlan) *controlplanev1.StorePlan {
-	return &controlplanev1.StorePlan{
+	pb := &controlplanev1.StorePlan{
 		StoreType:     sp.StoreType,
 		ConnectionRef: sp.ConnectionRef,
 		Target:        sp.Target,
 		Dsn:           sp.DSN,
 		Endpoint:      sp.Endpoint,
 		Bucket:        sp.Bucket,
+		OrderBy:       sp.OrderBy,
 	}
+	if sp.MinAge != nil {
+		pb.HasMinAge = true
+		pb.MinAgeSeconds = int64(sp.MinAge.Seconds())
+	}
+	if sp.MaxAge != nil {
+		pb.HasMaxAge = true
+		pb.MaxAgeSeconds = int64(sp.MaxAge.Seconds())
+	}
+	pb.Columns = make([]*controlplanev1.ColumnPlan, len(sp.Columns))
+	for i, c := range sp.Columns {
+		pb.Columns[i] = &controlplanev1.ColumnPlan{Source: c.Source, As: c.As}
+	}
+	return pb
 }

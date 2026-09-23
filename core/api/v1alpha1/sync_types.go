@@ -37,8 +37,10 @@ type SyncSpec struct {
 	ConsumerGroup string `json:"consumerGroup,omitempty" yaml:"consumerGroup,omitempty"`
 	// Retention prunes rows older than Days from a postgres target,
 	// enforced by workerd via periodic DELETEs. Only valid when the target
-	// connection is postgres. A Projection's spec.tiering reuses this same
-	// window as its recent/historical cutover rather than duplicating it.
+	// connection is postgres. This is purely an ingest-time storage
+	// concern — a Projection's own spec.sources[].routing decides how
+	// queries route across sources, independently, and doesn't require
+	// this to be set at all.
 	Retention *SyncRetention `json:"retention,omitempty" yaml:"retention,omitempty"`
 }
 

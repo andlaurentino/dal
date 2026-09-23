@@ -6,7 +6,7 @@ metadata:
 spec:
   sources:
     - syncRef: events-to-lake
-      maxStalenessSeconds: 300
+      view:
+        table: events/raw
   queryable:
-    table: events/raw
     defaultLimit: 20

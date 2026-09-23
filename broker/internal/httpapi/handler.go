@@ -1,8 +1,10 @@
 // Package httpapi exposes the broker's public query endpoint. It resolves a
-// query plan via the control plane's QueryPlanner, then dispatches the read
-// to the store-specific executor(s) — a single postgres or lake executor
-// for a plain projection, or both (stitched together per page) for a
-// tiered one.
+// query plan via the control plane's QueryPlanner, then queries each
+// resolved source in order (youngest to oldest), stitching pages across
+// them so pagination looks seamless regardless of how many sources answer
+// a Projection or where a page's boundary falls relative to their routing
+// windows. A single-source Projection is just the one-source case of the
+// same loop — no separate code path.
 package httpapi
 
 import (
@@ -15,6 +17,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/andersonlaurentino/dal-broker/internal/executors"
 	"github.com/andersonlaurentino/dal-broker/internal/executors/lake"
 	"github.com/andersonlaurentino/dal-broker/internal/executors/postgres"
 	"github.com/andersonlaurentino/dal-broker/internal/grpcclient"
@@ -28,8 +31,7 @@ const (
 
 type Handler struct {
 	planner       *grpcclient.Client
-	postgres      *postgres.Executor
-	lake          *lake.Executor
+	stores        map[string]executors.Executor
 	s3AccessKeyID string
 	s3SecretKey   string
 	log           *slog.Logger
@@ -42,9 +44,11 @@ func New(planner *grpcclient.Client, log *slog.Logger) (*Handler, error) {
 		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY must both be set")
 	}
 	return &Handler{
-		planner:       planner,
-		postgres:      postgres.New(),
-		lake:          lake.New(),
+		planner: planner,
+		stores: map[string]executors.Executor{
+			"postgres": postgres.New(),
+			"datalake": lake.New(),
+		},
 		s3AccessKeyID: accessKey,
 		s3SecretKey:   secretKey,
 		log:           log,
@@ -74,97 +78,101 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if plan.GetHistorical() != nil {
-		h.handleTieredQuery(w, r.Context(), projection, plan, limit, offset)
+	sources := plan.GetSources()
+	if len(sources) == 0 {
+		h.log.Error("resolve plan returned no sources", "projection", projection)
+		writeError(w, http.StatusBadGateway, "projection has no resolvable sources")
 		return
 	}
 
-	primary := plan.GetPrimary()
-	columns, rows, total, err := h.queryStore(r.Context(), primary, "", limit, offset)
-	if err != nil {
-		h.log.Error("query failed", "projection", projection, "target", primary.GetTarget(), "err", err)
-		writeError(w, http.StatusBadGateway, "failed to query projection: "+err.Error())
-		return
+	// Sources are already ordered youngest to oldest by the planner. Query
+	// each in turn, carrying the remaining limit/offset forward — a source
+	// fully skipped by offset (or fully consumed by limit) is still
+	// queried (with limit possibly 0) so its Total contributes to the
+	// grand total: without that, early pages would under-report `total`
+	// and callers couldn't tell there's more data in a later source. A
+	// limit-0 query still runs the underlying COUNT(*) but fetches no
+	// rows, so this costs a query without pulling data we'd discard.
+	now := time.Now()
+	remainingLimit, remainingOffset := limit, offset
+	var rows [][]any
+	var columns []executors.Column
+	var total int64
+
+	for _, sp := range sources {
+		after, before := ageBounds(sp, now)
+
+		srcLimit := max(remainingLimit, 0)
+		srcOffset := max(remainingOffset, 0)
+
+		result, err := h.queryStore(r.Context(), sp, after, before, srcLimit, srcOffset)
+		if err != nil {
+			h.log.Error("query failed", "projection", projection, "target", sp.GetTarget(), "err", err)
+			writeError(w, http.StatusBadGateway, "failed to query projection: "+err.Error())
+			return
+		}
+
+		total += result.Total
+		if columns == nil {
+			columns = result.Columns
+		}
+		rows = append(rows, result.Rows...)
+
+		remainingOffset -= int(result.Total)
+		remainingLimit = limit - len(rows)
 	}
 
-	writeResult(w, columns, rows, total, limit, offset, false)
+	writeResult(w, columns, rows, total, limit, offset, len(sources) > 1)
 }
 
-// handleTieredQuery always fills the page to `limit` rows (when available)
-// by stitching the tail of the postgres "recent" tier with the head of the
-// lake "historical" tier's continuation, so pagination looks seamless to
-// the caller regardless of where the retention cutover falls within a page.
-func (h *Handler) handleTieredQuery(w http.ResponseWriter, ctx context.Context, projection string, plan *controlplanev1.ResolvePlanResponse, limit, offset int) {
-	primary := plan.GetPrimary()
-	historical := plan.GetHistorical()
-	cutoverColumn := plan.GetCutoverColumn()
-	cutoverBefore := time.Now().AddDate(0, 0, -int(plan.GetRetentionDays()))
+// ageBounds converts a StorePlan's age window into absolute time bounds
+// for executors.QueryRequest.After/Before, relative to now. See
+// executors.QueryRequest's doc comment for the exact (after, before]
+// semantics; the derivation: a row is in this source's window when
+// MinAge <= age(row) < MaxAge, and age(row) = now - timestamp, which
+// rearranges to timestamp in (now-MaxAge, now-MinAge].
+func ageBounds(sp *controlplanev1.StorePlan, now time.Time) (after, before *time.Time) {
+	if sp.GetHasMaxAge() {
+		t := now.Add(-time.Duration(sp.GetMaxAgeSeconds()) * time.Second)
+		after = &t
+	}
+	if sp.GetHasMinAge() {
+		t := now.Add(-time.Duration(sp.GetMinAgeSeconds()) * time.Second)
+		before = &t
+	}
+	return after, before
+}
 
-	pgColumns, pgRows, pgTotal, err := h.postgres.Query(ctx, primary.GetDsn(), primary.GetTarget(), cutoverColumn, limit, offset)
-	if err != nil {
-		h.log.Error("tiered query: postgres tier failed", "projection", projection, "target", primary.GetTarget(), "err", err)
-		writeError(w, http.StatusBadGateway, "failed to query projection: "+err.Error())
-		return
+// queryStore dispatches to whichever Executor is registered for sp's store
+// type — the only place broker branches on store type at all, and it's a
+// map lookup, not a switch: adding a new target store means registering a
+// new executors.Executor adapter in New, not editing this function.
+func (h *Handler) queryStore(ctx context.Context, sp *controlplanev1.StorePlan, after, before *time.Time, limit, offset int) (executors.QueryResult, error) {
+	ex, ok := h.stores[sp.GetStoreType()]
+	if !ok {
+		return executors.QueryResult{}, errUnsupportedStoreType(sp.GetStoreType())
 	}
 
-	rows := pgRows
-	var columns any = pgColumns
-	remaining := limit - len(pgRows)
-	if remaining < 0 {
-		remaining = 0
+	cols := sp.GetColumns()
+	colSpec := make([]executors.ColumnSpec, len(cols))
+	for i, c := range cols {
+		colSpec[i] = executors.ColumnSpec{Source: c.GetSource(), As: c.GetAs()}
 	}
 
-	// Always query the lake tier, even for a page postgres alone fully
-	// answers (remaining == 0): its total (rows strictly older than the
-	// cutover) is needed to report the true combined total, not just what
-	// postgres itself holds — otherwise early pages under-report `total`
-	// and callers can't tell there's more data beyond postgres's window.
-	// A limit of 0 still runs the lake executor's COUNT(*) but fetches no
-	// rows, so this costs a query without pulling data we'd discard.
-	lakeOffset := offset - int(pgTotal)
-	if lakeOffset < 0 {
-		lakeOffset = 0
-	}
-	lakeCfg := lake.Config{
-		Endpoint:        historical.GetEndpoint(),
-		Bucket:          historical.GetBucket(),
+	return ex.Query(ctx, executors.QueryRequest{
+		DSN:             sp.GetDsn(),
+		Table:           sp.GetTarget(),
+		Endpoint:        sp.GetEndpoint(),
+		Bucket:          sp.GetBucket(),
 		AccessKeyID:     h.s3AccessKeyID,
 		SecretAccessKey: h.s3SecretKey,
-	}
-	lakeColumns, lakeRows, lakeOlderTotal, err := h.lake.Query(ctx, lakeCfg, historical.GetTarget(), cutoverColumn, &cutoverBefore, remaining, lakeOffset)
-	if err != nil {
-		h.log.Error("tiered query: lake tier failed", "projection", projection, "target", historical.GetTarget(), "err", err)
-		writeError(w, http.StatusBadGateway, "failed to query projection: "+err.Error())
-		return
-	}
-	rows = append(rows, lakeRows...)
-	if len(pgColumns) == 0 {
-		columns = lakeColumns
-	}
-
-	total := pgTotal + lakeOlderTotal
-	writeResult(w, columns, rows, total, limit, offset, true)
-}
-
-// queryStore dispatches to the store-specific executor for a plain
-// (untiered) projection. columns is returned as `any` since callers only
-// need to JSON-encode it — postgres.Column and lake.Column already share
-// the same {name,type} shape.
-func (h *Handler) queryStore(ctx context.Context, sp *controlplanev1.StorePlan, orderBy string, limit, offset int) (any, [][]any, int64, error) {
-	switch sp.GetStoreType() {
-	case "postgres":
-		return h.postgres.Query(ctx, sp.GetDsn(), sp.GetTarget(), orderBy, limit, offset)
-	case "datalake":
-		cfg := lake.Config{
-			Endpoint:        sp.GetEndpoint(),
-			Bucket:          sp.GetBucket(),
-			AccessKeyID:     h.s3AccessKeyID,
-			SecretAccessKey: h.s3SecretKey,
-		}
-		return h.lake.Query(ctx, cfg, sp.GetTarget(), orderBy, nil, limit, offset)
-	default:
-		return nil, nil, 0, errUnsupportedStoreType(sp.GetStoreType())
-	}
+		Columns:         colSpec,
+		OrderBy:         sp.GetOrderBy(),
+		After:           after,
+		Before:          before,
+		Limit:           limit,
+		Offset:          offset,
+	})
 }
 
 type errUnsupportedStoreType string

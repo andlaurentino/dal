@@ -47,10 +47,34 @@ export interface SyncSpec {
   retention?: { days: number; timestampColumn: string };
 }
 
+export interface SourceColumn {
+  source: string;
+  as?: string;
+}
+
+export interface SourceRouting {
+  type: "timeRange";
+  timestampColumn: string;
+  minAge?: string;
+  maxAge?: string;
+}
+
+export interface SourceView {
+  table: string;
+  columns?: SourceColumn[];
+}
+
+export interface ProjectionSource {
+  syncRef: string;
+  // Required when the Projection has more than one source; must be unset
+  // when it has exactly one (nothing to route between).
+  routing?: SourceRouting;
+  view: SourceView;
+}
+
 export interface ProjectionSpec {
-  sources: { syncRef: string; maxStalenessSeconds?: number }[];
-  queryable: { table: string; defaultLimit?: number };
-  tiering?: { recentSyncRef: string; historicalSyncRef: string };
+  sources: ProjectionSource[];
+  queryable: { defaultLimit?: number };
 }
 
 // Resource<T> mirrors httpapi.okResponse: the decoded spec plus the raw YAML

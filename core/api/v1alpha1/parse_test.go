@@ -105,9 +105,7 @@ func TestValidateProjection_RequiresSources(t *testing.T) {
 	p := &Projection{
 		TypeMeta: TypeMeta{APIVersion: APIVersion, Kind: KindProjection},
 		Metadata: ObjectMeta{Name: "p"},
-		Spec: ProjectionSpec{
-			Queryable: ProjectionQueryable{Table: "t"},
-		},
+		Spec:     ProjectionSpec{},
 	}
 	if err := ValidateProjection(p); err == nil {
 		t.Fatal("expected error for empty sources")

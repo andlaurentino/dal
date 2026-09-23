@@ -56,13 +56,13 @@ export default async function ProjectionDetailPage({
           <CardTitle>Queryable</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Table</span>
-          <span>{spec.queryable.table}</span>
-          {spec.queryable.defaultLimit && (
+          {spec.queryable.defaultLimit ? (
             <>
-              <span className="mt-2 text-muted-foreground">Default limit</span>
+              <span className="text-muted-foreground">Default limit</span>
               <span>{spec.queryable.defaultLimit}</span>
             </>
+          ) : (
+            <span className="text-muted-foreground">No default limit set</span>
           )}
         </CardContent>
       </Card>
@@ -77,7 +77,8 @@ export default async function ProjectionDetailPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Sync</TableHead>
-                  <TableHead>Max staleness</TableHead>
+                  <TableHead>Table / path</TableHead>
+                  <TableHead>Routing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -88,8 +89,11 @@ export default async function ProjectionDetailPage({
                         {s.syncRef}
                       </Link>
                     </TableCell>
+                    <TableCell>{s.view.table}</TableCell>
                     <TableCell>
-                      {s.maxStalenessSeconds ? `${s.maxStalenessSeconds}s` : "—"}
+                      {s.routing
+                        ? `${s.routing.timestampColumn}: ${s.routing.minAge ?? "0"} – ${s.routing.maxAge ?? "∞"}`
+                        : "—"}
                     </TableCell>
                   </TableRow>
                 ))}

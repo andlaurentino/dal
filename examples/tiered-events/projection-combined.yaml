@@ -1,7 +1,13 @@
-# Tiered view: recent pages come from postgres (events-to-postgres, 7-day
-# retention), older pages come from the lake (events-to-lake, full
-# history) — broker stitches pages that straddle the cutover so every page
-# still returns defaultLimit rows.
+# Tiered view: recent pages come from postgres (events-to-postgres, pruned
+# to 7 days by that Sync's own spec.retention), older pages come from the
+# lake (events-to-lake, full history) — broker stitches pages that
+# straddle the cutover so every page still returns defaultLimit rows.
+#
+# The 168h (7-day) cutover here is a Projection-level routing decision,
+# independent of events-to-postgres's own retention window (which is what
+# actually prunes rows from postgres) — they happen to agree in this
+# example, but routing no longer requires a Sync to declare retention at
+# all, unlike the old spec.tiering design.
 apiVersion: dal.io/v1alpha1
 kind: Projection
 metadata:
@@ -9,12 +15,18 @@ metadata:
 spec:
   sources:
     - syncRef: events-to-postgres
-      maxStalenessSeconds: 30
+      routing:
+        type: timeRange
+        timestampColumn: occurred_at
+        maxAge: 168h
+      view:
+        table: user_events
     - syncRef: events-to-lake
-      maxStalenessSeconds: 300
+      routing:
+        type: timeRange
+        timestampColumn: occurred_at
+        minAge: 168h
+      view:
+        table: events/raw
   queryable:
-    table: user_events
     defaultLimit: 20
-  tiering:
-    recentSyncRef: events-to-postgres
-    historicalSyncRef: events-to-lake

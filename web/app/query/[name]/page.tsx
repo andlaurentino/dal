@@ -43,10 +43,10 @@ export default async function QueryProjectionPage({
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {result.ok && result.data.tiered && (
             <span className="rounded-full border border-border px-2 py-0.5 text-xs">
-              postgres + lake
+              {projection.spec.sources.length} sources
             </span>
           )}
-          <span>{projection.spec.queryable.table}</span>
+          <span>{projection.spec.sources.map((s) => s.view.table).join(", ")}</span>
         </div>
       </div>
 
