@@ -1,14 +1,17 @@
 // Package grpcserver hosts the WorkerManager and QueryPlanner gRPC services
 // that the control plane exposes to workers and the broker, respectively.
 //
-// M1 scope: WorkerManager logs what it received and returns zero-value
-// responses. Real behavior (Redis-backed state updates) lands in M2/M3.
-// QueryPlanner.ResolvePlan is implemented via internal/planner.
+// WorkerManager persists what it receives into internal/store's observed-
+// state keys (SyncObservedKey/SyncHeartbeatKey) so workermgr.ListWorkerStatus
+// can read it back out for the /workers API — see RegisterWorker/Heartbeat/
+// ReportError below. QueryPlanner.ResolvePlan is implemented via
+// internal/planner.
 package grpcserver
 
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/andersonlaurentino/dal-controlplane/internal/planner"
 	"github.com/andersonlaurentino/dal-controlplane/internal/store"
@@ -41,11 +44,18 @@ func (s *Server) Heartbeat(ctx context.Context, req *controlplanev1.HeartbeatReq
 		"lag", req.GetConsumerLag(),
 		"watermark", req.GetWatermark(),
 	)
+	at := time.Unix(req.GetTimestampUnix(), 0)
+	if err := s.store.PutSyncHeartbeat(ctx, req.GetSyncName(), req.GetPhase(), req.GetConsumerLag(), req.GetWatermark(), at); err != nil {
+		s.log.Error("persisting heartbeat", "sync", req.GetSyncName(), "err", err)
+	}
 	return &controlplanev1.HeartbeatResponse{}, nil
 }
 
 func (s *Server) ReportError(ctx context.Context, req *controlplanev1.ReportErrorRequest) (*controlplanev1.ReportErrorResponse, error) {
 	s.log.Error("worker reported error", "sync", req.GetSyncName(), "message", req.GetMessage(), "fatal", req.GetFatal())
+	if err := s.store.PutSyncError(ctx, req.GetSyncName(), req.GetMessage(), req.GetFatal()); err != nil {
+		s.log.Error("persisting error report", "sync", req.GetSyncName(), "err", err)
+	}
 	return &controlplanev1.ReportErrorResponse{}, nil
 }
 

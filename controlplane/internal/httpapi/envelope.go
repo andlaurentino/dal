@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // okResponse is returned for a single resource: the decoded fields the web
@@ -17,6 +18,24 @@ type okResponse struct {
 
 type listResponse struct {
 	Items []okResponse `json:"items"`
+}
+
+// workerStatusResponse mirrors workermgr.WorkerStatus for the /workers API.
+type workerStatusResponse struct {
+	SyncName        string     `json:"syncName"`
+	PodPhase        string     `json:"podPhase"`
+	Ready           bool       `json:"ready"`
+	Restarts        int32      `json:"restarts"`
+	Alive           bool       `json:"alive"`
+	ObservedPhase   string     `json:"observedPhase,omitempty"`
+	LastHeartbeatAt *time.Time `json:"lastHeartbeatAt,omitempty"`
+	ConsumerLag     *int64     `json:"consumerLag,omitempty"`
+	Watermark       string     `json:"watermark,omitempty"`
+	LastError       string     `json:"lastError,omitempty"`
+}
+
+type workerStatusListResponse struct {
+	Items []workerStatusResponse `json:"items"`
 }
 
 type errorResponse struct {

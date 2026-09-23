@@ -90,6 +90,19 @@ export type ConnectionResource = Resource<ConnectionSpec>;
 export type SyncResource = Resource<SyncSpec>;
 export type ProjectionResource = Resource<ProjectionSpec>;
 
+export interface WorkerStatus {
+  syncName: string;
+  podPhase: string;
+  ready: boolean;
+  restarts: number;
+  alive: boolean;
+  observedPhase?: string;
+  lastHeartbeatAt?: string;
+  consumerLag?: number;
+  watermark?: string;
+  lastError?: string;
+}
+
 export type ApplyResult = { ok: true } | { ok: false; error: string };
 
 interface ErrorBody {
@@ -121,6 +134,9 @@ export const listProjections = () =>
   get<{ items: ProjectionResource[] }>("/api/v1alpha1/projections").then((r) => r?.items ?? []);
 export const getProjection = (name: string) =>
   get<ProjectionResource>(`/api/v1alpha1/projections/${encodeURIComponent(name)}`);
+
+export const listWorkers = () =>
+  get<{ items: WorkerStatus[] }>("/api/v1alpha1/workers").then((r) => r?.items ?? []);
 
 export async function applyResource(yamlText: string): Promise<ApplyResult> {
   const res = await fetch(`${BASE}/api/v1alpha1/apply`, {

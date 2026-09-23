@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, Pencil } from "lucide-react";
-import { getProjection } from "@/lib/controlplane";
+import {
+  getProjection,
+  listConnections,
+  listProjections,
+  listSyncs,
+  listWorkers,
+} from "@/lib/controlplane";
 import { queryProjection } from "@/lib/broker";
+import { buildLineageGraph, projectionId, subgraphAround } from "@/lib/lineage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import DeleteButton from "@/components/DeleteButton";
+import LineageGraphView from "@/components/LineageGraph";
 import RawSourceViewer from "@/components/RawSourceViewer";
 
 function formatCell(value: unknown): string {
@@ -32,6 +40,17 @@ export default async function ProjectionDetailPage({
 
   const { spec } = projection;
   const sample = await queryProjection(name, { limit: 10, offset: 0 });
+
+  const [connections, syncs, projections, workers] = await Promise.all([
+    listConnections(),
+    listSyncs(),
+    listProjections(),
+    listWorkers(),
+  ]);
+  const lineage = subgraphAround(
+    buildLineageGraph(connections, syncs, projections, workers),
+    projectionId(name),
+  );
 
   return (
     <div className="grid gap-6">
@@ -152,6 +171,19 @@ export default async function ProjectionDetailPage({
               </Table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Lineage</CardTitle>
+          <Button variant="ghost" size="sm" render={<Link href="/lineage" />}>
+            Full graph
+            <ArrowRight />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <LineageGraphView graph={lineage} />
         </CardContent>
       </Card>
 
