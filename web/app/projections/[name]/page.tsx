@@ -124,6 +124,19 @@ export default async function ProjectionDetailPage({
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Lineage</CardTitle>
+          <Button variant="ghost" size="sm" render={<Link href="/lineage" />}>
+            Full graph
+            <ArrowRight />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <LineageGraphView graph={lineage} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Sample data</CardTitle>
           <Button
             variant="ghost"
@@ -171,19 +184,6 @@ export default async function ProjectionDetailPage({
               </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Lineage</CardTitle>
-          <Button variant="ghost" size="sm" render={<Link href="/lineage" />}>
-            Full graph
-            <ArrowRight />
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <LineageGraphView graph={lineage} />
         </CardContent>
       </Card>
 
