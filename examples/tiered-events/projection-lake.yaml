@@ -1,12 +1,14 @@
-# Full-history view: served entirely from the lake.
 apiVersion: dal.io/v1alpha1
 kind: Projection
 metadata:
   name: events-history
 spec:
   sources:
-    - syncRef: events-to-lake
-      maxStalenessSeconds: 300
-  queryable:
-    table: events/raw
-    defaultLimit: 20
+    - connectionRef: datalake
+      view:
+        table: events/raw
+        columns:
+          - source: event_id
+          - source: user_id
+          - source: event_type
+          - source: occurred_at

@@ -138,21 +138,36 @@ export async function applyProjectionAction(
     return { ok: false, fieldErrors: { name: nameCheck.error.issues[0].message } };
   }
 
-  let sources: unknown[] = [];
+  let rows: {
+    connectionRef: string;
+    table: string;
+    columns: { source: string; as?: string }[];
+    timestampColumn?: string;
+    minAge?: string;
+    maxAge?: string;
+  }[] = [];
   try {
-    sources = JSON.parse(String(formData.get("sources") ?? "[]"));
+    rows = JSON.parse(String(formData.get("sources") ?? "[]"));
   } catch {
-    sources = [];
+    rows = [];
   }
 
-  const defaultLimitRaw = String(formData.get("defaultLimit") ?? "");
-  const spec = {
-    sources,
-    queryable: {
-      table: String(formData.get("table") ?? ""),
-      defaultLimit: defaultLimitRaw || undefined,
-    },
-  };
+  const sources = rows.map((r) => ({
+    connectionRef: r.connectionRef,
+    view: { table: r.table, columns: r.columns },
+    ...(rows.length > 1
+      ? {
+          routing: {
+            type: "timeRange" as const,
+            timestampColumn: r.timestampColumn ?? "",
+            minAge: r.minAge || undefined,
+            maxAge: r.maxAge || undefined,
+          },
+        }
+      : {}),
+  }));
+
+  const spec = { sources };
 
   const parsed = projectionSchema.safeParse(spec);
   if (!parsed.success) {

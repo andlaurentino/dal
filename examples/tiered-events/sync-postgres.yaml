@@ -1,15 +1,13 @@
-# Recent-window sync: kafka -> postgres, pruned to the last 7 days by
-# workerd. Fast/indexed for the most common "recent activity" queries.
 apiVersion: dal.io/v1alpha1
 kind: Sync
 metadata:
   name: events-to-postgres
 spec:
   source:
-    connectionRef: kafka-events
+    connectionRef: kafka
     topic: user-events
   target:
-    connectionRef: pg-warehouse
+    connectionRef: postgres
     table: user_events
   mode: streaming
   replication: delta

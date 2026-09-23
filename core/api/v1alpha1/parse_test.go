@@ -48,7 +48,7 @@ func TestDecodeProjection_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(p.Spec.Sources) != 1 || p.Spec.Sources[0].SyncRef != "events-to-postgres" {
+	if len(p.Spec.Sources) != 1 || p.Spec.Sources[0].ConnectionRef != "postgres" {
 		t.Fatalf("unexpected sources: %+v", p.Spec.Sources)
 	}
 }
@@ -105,9 +105,7 @@ func TestValidateProjection_RequiresSources(t *testing.T) {
 	p := &Projection{
 		TypeMeta: TypeMeta{APIVersion: APIVersion, Kind: KindProjection},
 		Metadata: ObjectMeta{Name: "p"},
-		Spec: ProjectionSpec{
-			Queryable: ProjectionQueryable{Table: "t"},
-		},
+		Spec:     ProjectionSpec{},
 	}
 	if err := ValidateProjection(p); err == nil {
 		t.Fatal("expected error for empty sources")

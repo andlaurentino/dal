@@ -1,13 +1,10 @@
-# Full-history sync: kafka -> lake, same topic/mapping as sync-postgres.yaml,
-# no retention — this Delta table (with Change Data Feed enabled) is the
-# durable record of every event ever produced.
 apiVersion: dal.io/v1alpha1
 kind: Sync
 metadata:
   name: events-to-lake
 spec:
   source:
-    connectionRef: kafka-events
+    connectionRef: kafka
     topic: user-events
   target:
     connectionRef: datalake

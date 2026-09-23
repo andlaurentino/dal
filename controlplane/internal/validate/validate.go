@@ -33,17 +33,6 @@ func (v *Validator) getConnection(ctx context.Context, name string) (*v1alpha1.C
 	return v1alpha1.DecodeConnection(raw)
 }
 
-func (v *Validator) getSync(ctx context.Context, name string) (*v1alpha1.Sync, error) {
-	raw, err := v.store.Get(ctx, store.KindSync, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("sync %q does not exist", name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return v1alpha1.DecodeSync(raw)
-}
-
 // validPairs enumerates the only (source type, target type) combinations
 // workerd knows how to run. Keep in sync with workerd's own dispatch
 // (workerd/src/main.rs) — a pair accepted here but not implemented there
@@ -122,72 +111,28 @@ func validateRoleFields(side string, connType v1alpha1.ConnectionType, topicOrTa
 	return nil
 }
 
-// ValidateProjection checks that every referenced Sync exists, and — for a
-// tiered projection — that the recent/historical pair is actually shaped
-// the way tiering requires (postgres-with-retention feeding the recent
-// side, datalake feeding the historical side).
+// ValidateProjection checks that every referenced Connection exists and is
+// queryable (postgres or datalake, not kafka) — core/api/v1alpha1's schema
+// validation already checked that spec.sources[].view.columns is non-empty
+// and, for multi-source projections, that every source's resolved column
+// set matches exactly; neither needs store access, so both live there
+// instead of here.
 func (v *Validator) ValidateProjection(ctx context.Context, p *v1alpha1.Projection) error {
 	var errs []error
 	for i, src := range p.Spec.Sources {
-		ok, err := v.store.Exists(ctx, store.KindSync, src.SyncRef)
+		c, err := v.getConnection(ctx, src.ConnectionRef)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("spec.sources[%d].syncRef: %w", i, err))
+			errs = append(errs, fmt.Errorf("spec.sources[%d].connectionRef: %w", i, err))
 			continue
 		}
-		if !ok {
-			errs = append(errs, fmt.Errorf("spec.sources[%d].syncRef: sync %q does not exist", i, src.SyncRef))
+		switch c.Spec.Type {
+		case v1alpha1.ConnectionTypePostgres, v1alpha1.ConnectionTypeDatalake:
+		default:
+			errs = append(errs, fmt.Errorf(
+				"spec.sources[%d].connectionRef: connection %q has type %q, which is not queryable",
+				i, src.ConnectionRef, c.Spec.Type,
+			))
 		}
 	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-
-	if t := p.Spec.Tiering; t != nil {
-		recent, err := v.getSync(ctx, t.RecentSyncRef)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef: %w", err))
-		}
-		historical, histErr := v.getSync(ctx, t.HistoricalSyncRef)
-		if histErr != nil {
-			errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef: %w", histErr))
-		}
-
-		if err == nil && histErr == nil {
-			if recent.Spec.Retention == nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef %q must declare spec.retention", t.RecentSyncRef))
-			}
-
-			recentTgt, rErr := v.getConnection(ctx, recent.Spec.Target.ConnectionRef)
-			if rErr != nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef: %w", rErr))
-			} else if recentTgt.Spec.Type != v1alpha1.ConnectionTypePostgres {
-				errs = append(errs, fmt.Errorf("spec.tiering.recentSyncRef %q must target a postgres connection, got %q", t.RecentSyncRef, recentTgt.Spec.Type))
-			}
-
-			histTgt, hErr := v.getConnection(ctx, historical.Spec.Target.ConnectionRef)
-			if hErr != nil {
-				errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef: %w", hErr))
-			} else if histTgt.Spec.Type != v1alpha1.ConnectionTypeDatalake {
-				errs = append(errs, fmt.Errorf("spec.tiering.historicalSyncRef %q must target a datalake connection, got %q", t.HistoricalSyncRef, histTgt.Spec.Type))
-			}
-
-			if recent.Spec.Retention != nil {
-				var haveCutoverCol bool
-				for _, f := range historical.Spec.Mapping.Schema {
-					if f.Column == recent.Spec.Retention.TimestampColumn {
-						haveCutoverCol = true
-						break
-					}
-				}
-				if !haveCutoverCol {
-					errs = append(errs, fmt.Errorf(
-						"spec.tiering.historicalSyncRef %q has no mapping column matching recentSyncRef %q's retention.timestampColumn %q",
-						t.HistoricalSyncRef, t.RecentSyncRef, recent.Spec.Retention.TimestampColumn,
-					))
-				}
-			}
-		}
-	}
-
 	return errors.Join(errs...)
 }

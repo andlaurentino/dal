@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -150,6 +151,93 @@ func (m *Manager) reconcileAll(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// WorkerStatus is one Sync's combined live (Kubernetes Pod) and observed
+// (workerd's own heartbeat/error reports, read back from internal/store)
+// status, for the /workers API.
+type WorkerStatus struct {
+	SyncName string
+
+	// PodPhase/Ready/Restarts come from the Kubernetes Pod itself —
+	// "Missing" PodPhase means no Pod exists for this Sync at all (e.g.
+	// still being scheduled, or workermgr hasn't reconciled it yet).
+	PodPhase string
+	Ready    bool
+	Restarts int32
+
+	// Alive reports whether workerd's own heartbeat is currently within
+	// its TTL — this can be true even if the Pod's own readiness probe
+	// says otherwise (or vice versa: a Pod can be Ready while workerd is
+	// wedged and no longer heartbeating), which is exactly why both are
+	// surfaced rather than collapsed into one status.
+	Alive           bool
+	ObservedPhase   string
+	LastHeartbeatAt *time.Time
+	ConsumerLag     *int64
+	Watermark       string
+	LastError       string
+}
+
+// ListWorkerStatus returns one WorkerStatus per desired Sync (not per
+// ReplicaSet/Pod — a Sync with no Pod yet still gets an entry with
+// PodPhase "Missing", so a caller can tell "not scheduled" apart from
+// "no such Sync"), combining live Kubernetes Pod state with workerd's own
+// observed state from internal/store.
+func (m *Manager) ListWorkerStatus(ctx context.Context) ([]WorkerStatus, error) {
+	desired, err := m.store.List(ctx, store.KindSync)
+	if err != nil {
+		return nil, fmt.Errorf("listing syncs: %w", err)
+	}
+	sort.Strings(desired)
+
+	pods, err := m.clientset.CoreV1().Pods(m.cfg.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=" + appLabel,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing worker pods: %w", err)
+	}
+	podBySync := make(map[string]corev1.Pod, len(pods.Items))
+	for _, p := range pods.Items {
+		if sync := p.Labels["sync"]; sync != "" {
+			podBySync[sync] = p
+		}
+	}
+
+	statuses := make([]WorkerStatus, 0, len(desired))
+	for _, name := range desired {
+		ws := WorkerStatus{SyncName: name, PodPhase: "Missing"}
+
+		if pod, ok := podBySync[name]; ok {
+			ws.PodPhase = string(pod.Status.Phase)
+			if len(pod.Status.ContainerStatuses) > 0 {
+				cs := pod.Status.ContainerStatuses[0]
+				ws.Ready = cs.Ready
+				ws.Restarts = cs.RestartCount
+			}
+		}
+
+		observed, alive, err := m.store.GetSyncObserved(ctx, name)
+		if err != nil {
+			m.log.Error("workermgr: getting observed sync state", "sync", name, "err", err)
+		} else {
+			ws.Alive = alive
+			if observed != nil {
+				ws.ObservedPhase = observed.Phase
+				ws.LastError = observed.LastError
+				ws.Watermark = observed.Watermark
+				lag := observed.ConsumerLag
+				ws.ConsumerLag = &lag
+				if !observed.LastHeartbeatAt.IsZero() {
+					at := observed.LastHeartbeatAt
+					ws.LastHeartbeatAt = &at
+				}
+			}
+		}
+
+		statuses = append(statuses, ws)
+	}
+	return statuses, nil
 }
 
 func (m *Manager) listReplicaSets(ctx context.Context) (map[string]bool, error) {

@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, Pencil } from "lucide-react";
-import { getSync } from "@/lib/controlplane";
+import {
+  getSync,
+  listConnections,
+  listProjections,
+  listSyncs,
+  listWorkers,
+} from "@/lib/controlplane";
+import { buildLineageGraph, subgraphAround, syncId } from "@/lib/lineage";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import DeleteButton from "@/components/DeleteButton";
+import LineageGraphView from "@/components/LineageGraph";
 import RawSourceViewer from "@/components/RawSourceViewer";
 
 export default async function SyncDetailPage({
@@ -26,6 +34,14 @@ export default async function SyncDetailPage({
   if (!sync) notFound();
 
   const { spec } = sync;
+
+  const [connections, syncs, projections, workers] = await Promise.all([
+    listConnections(),
+    listSyncs(),
+    listProjections(),
+    listWorkers(),
+  ]);
+  const lineage = subgraphAround(buildLineageGraph(connections, syncs, projections, workers), syncId(name));
 
   return (
     <div className="grid gap-6">
@@ -127,6 +143,19 @@ export default async function SyncDetailPage({
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Lineage</CardTitle>
+          <Button variant="ghost" size="sm" render={<Link href="/lineage" />}>
+            Full graph
+            <ArrowRight />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <LineageGraphView graph={lineage} />
         </CardContent>
       </Card>
 

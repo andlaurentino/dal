@@ -16,102 +16,127 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb"
+
+	"github.com/andersonlaurentino/dal-broker/internal/executors"
 )
-
-type Column struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-
-// Config identifies the S3-compatible datalake connection to read from.
-type Config struct {
-	Endpoint string
-	Bucket   string
-	// AccessKeyID/SecretAccessKey are the S3 credentials read from the
-	// S3_ACCESS_KEY/S3_SECRET_KEY env vars (see internal/httpapi.New),
-	// matching workerd's own storage_options — reserved for a future
-	// per-Connection secrets backend, same "unused (inline-only) in this
-	// slice" status as Connection.CredentialsRef elsewhere.
-	AccessKeyID     string
-	SecretAccessKey string
-}
 
 // Executor runs reads against Delta tables via DuckDB. Each query opens its
 // own DuckDB connection (rather than pooling) since extension LOAD state is
 // per-connection — simple and correct over clever, given query volume here
-// is not perf-critical.
+// is not perf-critical. Implements executors.Executor.
 type Executor struct{}
 
 func New() *Executor {
 	return &Executor{}
 }
 
-// Query returns the Delta table's columns, a page of rows, and the total
-// row count. When cutoverBefore is non-nil, only rows whose cutoverColumn
-// value is strictly before it are considered — this is how a tiered
-// projection asks the lake for only the portion of history not already
-// covered by its postgres "recent" tier.
-func (e *Executor) Query(ctx context.Context, cfg Config, path, cutoverColumn string, cutoverBefore *time.Time, limit, offset int) ([]Column, [][]any, int64, error) {
+// Query returns req.Columns (or, for passthrough, every column DuckDB
+// discovers), a page of rows, and the total row count. req.Table is the
+// lake path; req.Endpoint/Bucket/AccessKeyID/SecretAccessKey identify and
+// authenticate the datalake connection (req.DSN is ignored — meaningless
+// for this store type). req.After/req.Before bound req.OrderBy's value —
+// this is how a multi-source projection asks the lake for only the
+// portion of history a different source doesn't already cover.
+func (e *Executor) Query(ctx context.Context, req executors.QueryRequest) (executors.QueryResult, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("opening duckdb: %w", err)
+		return executors.QueryResult{}, fmt.Errorf("opening duckdb: %w", err)
 	}
 	defer db.Close()
 
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("opening duckdb connection: %w", err)
+		return executors.QueryResult{}, fmt.Errorf("opening duckdb connection: %w", err)
 	}
 	defer conn.Close()
 
-	if err := configure(ctx, conn, cfg); err != nil {
-		return nil, nil, 0, err
+	if err := configure(ctx, conn, req); err != nil {
+		return executors.QueryResult{}, err
 	}
 
-	source := fmt.Sprintf("delta_scan('s3://%s/%s')", cfg.Bucket, strings.Trim(path, "/"))
+	source := fmt.Sprintf("delta_scan('s3://%s/%s')", req.Bucket, strings.Trim(req.Table, "/"))
 
-	where := ""
-	var args []any
-	if cutoverBefore != nil {
-		where = fmt.Sprintf(" WHERE %s < ?", quoteIdent(cutoverColumn))
-		args = append(args, *cutoverBefore)
-	}
+	where, args := rangeWhere(req.OrderBy, req.After, req.Before)
 
 	var total int64
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s%s", source, where)
 	if err := conn.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, nil, 0, fmt.Errorf("counting lake rows: %w", err)
+		return executors.QueryResult{}, fmt.Errorf("counting lake rows: %w", err)
 	}
 	if total == 0 {
-		return nil, nil, 0, nil
+		return executors.QueryResult{}, nil
 	}
 
 	orderBy := ""
-	if cutoverColumn != "" {
-		orderBy = fmt.Sprintf(" ORDER BY %s DESC", quoteIdent(cutoverColumn))
+	if req.OrderBy != "" {
+		orderBy = fmt.Sprintf(" ORDER BY %s DESC", quoteIdent(req.OrderBy))
 	}
-	selectQuery := fmt.Sprintf("SELECT * FROM %s%s%s LIMIT ? OFFSET ?", source, where, orderBy)
-	selectArgs := append(append([]any{}, args...), limit, offset)
+	selectExpr := selectClause(req.Columns)
+	selectQuery := fmt.Sprintf("SELECT %s FROM %s%s%s LIMIT ? OFFSET ?", selectExpr, source, where, orderBy)
+	selectArgs := append(append([]any{}, args...), req.Limit, req.Offset)
 	rows, err := conn.QueryContext(ctx, selectQuery, selectArgs...)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("querying lake rows: %w", err)
+		return executors.QueryResult{}, fmt.Errorf("querying lake rows: %w", err)
 	}
 	defer rows.Close()
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
-		return nil, nil, 0, err
+		return executors.QueryResult{}, err
 	}
-	columns := make([]Column, len(colTypes))
+	columns := make([]executors.Column, len(colTypes))
 	for i, ct := range colTypes {
-		columns[i] = Column{Name: ct.Name(), Type: ct.DatabaseTypeName()}
+		columns[i] = executors.Column{Name: ct.Name(), Type: ct.DatabaseTypeName()}
 	}
 
 	page, err := scanRows(rows, len(columns))
 	if err != nil {
-		return nil, nil, 0, err
+		return executors.QueryResult{}, err
 	}
-	return columns, page, total, nil
+	return executors.QueryResult{Columns: columns, Rows: page, Total: total}, nil
+}
+
+// selectClause builds the SELECT column list: "*" for passthrough, or an
+// explicit "source AS as, ..." list — DuckDB's own query-result column
+// metadata (rows.ColumnTypes()) then naturally reflects the requested
+// aliases, so no separate metadata lookup is needed here (unlike
+// postgres's executor, which has to introspect information_schema up
+// front).
+func selectClause(spec []executors.ColumnSpec) string {
+	if len(spec) == 0 {
+		return "*"
+	}
+	parts := make([]string, len(spec))
+	for i, c := range spec {
+		as := c.As
+		if as == "" {
+			as = c.Source
+		}
+		parts[i] = fmt.Sprintf("%s AS %s", quoteIdent(c.Source), quoteIdent(as))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// rangeWhere builds a " WHERE ..." clause (or "" when neither bound is
+// set) filtering orderBy's value to (after, before] — see
+// executors.QueryRequest's After/Before doc comment for the exact
+// semantics.
+func rangeWhere(orderBy string, after, before *time.Time) (string, []any) {
+	if orderBy == "" || (after == nil && before == nil) {
+		return "", nil
+	}
+	ident := quoteIdent(orderBy)
+	var conds []string
+	var args []any
+	if after != nil {
+		conds = append(conds, ident+" > ?")
+		args = append(args, *after)
+	}
+	if before != nil {
+		conds = append(conds, ident+" <= ?")
+		args = append(args, *before)
+	}
+	return " WHERE " + strings.Join(conds, " AND "), args
 }
 
 // configure installs/loads the extensions and S3 credentials this
@@ -123,8 +148,8 @@ func (e *Executor) Query(ctx context.Context, cfg Config, path, cutoverColumn st
 // the default AWS credential chain (including an EC2 instance-metadata-
 // service lookup that hangs/times out off-AWS). DuckDB's s3_endpoint wants
 // a bare host:port (no scheme); use_ssl carries the scheme instead.
-func configure(ctx context.Context, conn *sql.Conn, cfg Config) error {
-	endpoint := cfg.Endpoint
+func configure(ctx context.Context, conn *sql.Conn, req executors.QueryRequest) error {
+	endpoint := req.Endpoint
 	useSSL := "false"
 	switch {
 	case strings.HasPrefix(endpoint, "https://"):
@@ -145,7 +170,7 @@ func configure(ctx context.Context, conn *sql.Conn, cfg Config) error {
 				ENDPOINT '%s',
 				URL_STYLE 'path',
 				USE_SSL %s
-			)`, cfg.AccessKeyID, cfg.SecretAccessKey, endpoint, useSSL),
+			)`, req.AccessKeyID, req.SecretAccessKey, endpoint, useSSL),
 	}
 	for _, stmt := range stmts {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {

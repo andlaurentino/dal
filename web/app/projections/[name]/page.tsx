@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, Pencil } from "lucide-react";
-import { getProjection } from "@/lib/controlplane";
+import {
+  getProjection,
+  listConnections,
+  listProjections,
+  listSyncs,
+  listWorkers,
+} from "@/lib/controlplane";
 import { queryProjection } from "@/lib/broker";
+import { buildLineageGraph, projectionId, subgraphAround } from "@/lib/lineage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -14,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import DeleteButton from "@/components/DeleteButton";
+import LineageGraphView from "@/components/LineageGraph";
 import RawSourceViewer from "@/components/RawSourceViewer";
 
 function formatCell(value: unknown): string {
@@ -32,6 +40,17 @@ export default async function ProjectionDetailPage({
 
   const { spec } = projection;
   const sample = await queryProjection(name, { limit: 10, offset: 0 });
+
+  const [connections, syncs, projections, workers] = await Promise.all([
+    listConnections(),
+    listSyncs(),
+    listProjections(),
+    listWorkers(),
+  ]);
+  const lineage = subgraphAround(
+    buildLineageGraph(connections, syncs, projections, workers),
+    projectionId(name),
+  );
 
   return (
     <div className="grid gap-6">
@@ -53,22 +72,6 @@ export default async function ProjectionDetailPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Queryable</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">Table</span>
-          <span>{spec.queryable.table}</span>
-          {spec.queryable.defaultLimit && (
-            <>
-              <span className="mt-2 text-muted-foreground">Default limit</span>
-              <span>{spec.queryable.defaultLimit}</span>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>Sources</CardTitle>
         </CardHeader>
         <CardContent>
@@ -76,26 +79,47 @@ export default async function ProjectionDetailPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Sync</TableHead>
-                  <TableHead>Max staleness</TableHead>
+                  <TableHead>Connection</TableHead>
+                  <TableHead>Table / path</TableHead>
+                  <TableHead>Columns</TableHead>
+                  <TableHead>Routing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {spec.sources.map((s) => (
-                  <TableRow key={s.syncRef}>
+                  <TableRow key={s.connectionRef}>
                     <TableCell>
-                      <Link href={`/syncs/${s.syncRef}`} className="hover:underline">
-                        {s.syncRef}
+                      <Link href={`/connections/${s.connectionRef}`} className="hover:underline">
+                        {s.connectionRef}
                       </Link>
                     </TableCell>
+                    <TableCell>{s.view.table}</TableCell>
                     <TableCell>
-                      {s.maxStalenessSeconds ? `${s.maxStalenessSeconds}s` : "—"}
+                      {s.view.columns.map((c) => (c.as ? `${c.source} as ${c.as}` : c.source)).join(", ")}
+                    </TableCell>
+                    <TableCell>
+                      {s.routing
+                        ? `${s.routing.timestampColumn}: ${s.routing.minAge ?? "0"} – ${s.routing.maxAge ?? "∞"}`
+                        : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Lineage</CardTitle>
+          <Button variant="ghost" size="sm" render={<Link href="/lineage" />}>
+            Full graph
+            <ArrowRight />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <LineageGraphView graph={lineage} />
         </CardContent>
       </Card>
 

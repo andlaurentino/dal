@@ -51,3 +51,54 @@ pub fn amazon_s3_builder(endpoint: &str, bucket: &str) -> Result<AmazonS3Builder
         .with_allow_http(true)
         .with_region("us-east-1"))
 }
+
+#[cfg(test)]
+mod tests {
+    //! Rust half of a two-language contract test: workerd resolves S3 auth
+    //! here via `AmazonS3Builder`, broker resolves the same connection's
+    //! credentials via DuckDB's `CREATE SECRET`
+    //! (broker/internal/executors/lake/s3_contract_test.go). Nothing in the
+    //! type system enforces these two independently-implemented paths stay
+    //! behaviorally identical — they drifted once already (the RustFS
+    //! migration outage). Both halves read the same DAL_TEST_S3_*/
+    //! S3_ACCESS_KEY/S3_SECRET_KEY env vars and must both authenticate
+    //! successfully against the same running S3-compatible store.
+    //!
+    //! Ignored by default (needs a live store); run explicitly:
+    //!
+    //!   DAL_TEST_S3_ENDPOINT=http://localhost:30900 \
+    //!   DAL_TEST_S3_BUCKET=dal-lake \
+    //!   S3_ACCESS_KEY=dalrustfs S3_SECRET_KEY=dalrustfs123 \
+    //!   cargo test --lib s3config::tests -- --ignored
+
+    use std::env;
+
+    use object_store::ObjectStore;
+
+    use super::amazon_s3_builder;
+
+    #[tokio::test]
+    #[ignore]
+    async fn s3_config_contract() {
+        let endpoint = env::var("DAL_TEST_S3_ENDPOINT")
+            .expect("DAL_TEST_S3_ENDPOINT must be set to run this test");
+        let bucket =
+            env::var("DAL_TEST_S3_BUCKET").expect("DAL_TEST_S3_BUCKET must be set to run this test");
+
+        let store = amazon_s3_builder(&endpoint, &bucket)
+            .expect("building AmazonS3Builder (S3_ACCESS_KEY/S3_SECRET_KEY must be set)")
+            .build()
+            .expect("building object store client");
+
+        // A bare list forces authentication without requiring any object to
+        // actually exist yet — it's the cheapest operation that still
+        // surfaces the class of 403 InvalidAccessKeyId this test exists to
+        // catch.
+        use futures_util::StreamExt;
+        let mut stream = store.list(None);
+        match stream.next().await {
+            Some(Err(e)) => panic!("listing bucket {bucket:?} failed (auth likely broken): {e}"),
+            _ => {}
+        }
+    }
+}

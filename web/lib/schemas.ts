@@ -80,17 +80,48 @@ export const syncSchema = z
 
 export type SyncFormValues = z.infer<typeof syncSchema>;
 
-const projectionSourceSchema = z.object({
-  syncRef: z.string().min(1, "Sync is required"),
-  maxStalenessSeconds: z.coerce.number().int().nonnegative().optional(),
+// Matches core/api/v1alpha1.ParseAge: a Go duration (168h, 30m, ...) or a
+// plain day count suffixed with "d" (7d, 1.5d) — Go duration strings have
+// no "d" unit of their own.
+const durationSchema = z
+  .string()
+  .regex(/^\d+(\.\d+)?(ns|us|µs|ms|s|m|h|d)$/, 'Use a duration like "7d", "168h", or "30m"')
+  .optional();
+
+const sourceColumnSchema = z.object({
+  source: z.string().min(1, "Source column is required"),
+  as: z.string().optional(),
 });
 
-export const projectionSchema = z.object({
-  sources: z.array(projectionSourceSchema).min(1, "At least one source is required"),
-  queryable: z.object({
-    table: z.string().min(1, "Table is required"),
-    defaultLimit: z.coerce.number().int().positive().optional(),
-  }),
+const sourceRoutingSchema = z.object({
+  type: z.literal("timeRange"),
+  timestampColumn: z.string().min(1, "Timestamp column is required"),
+  minAge: durationSchema,
+  maxAge: durationSchema,
 });
+
+const sourceViewSchema = z.object({
+  table: z.string().min(1, "Table is required"),
+  columns: z.array(sourceColumnSchema).min(1, "At least one column is required"),
+});
+
+const projectionSourceSchema = z.object({
+  connectionRef: z.string().min(1, "Connection is required"),
+  routing: sourceRoutingSchema.optional(),
+  view: sourceViewSchema,
+});
+
+export const projectionSchema = z
+  .object({
+    sources: z.array(projectionSourceSchema).min(1, "At least one source is required"),
+  })
+  .refine((v) => v.sources.length === 1 || v.sources.every((s) => !!s.routing), {
+    message: "Every source needs routing when there's more than one source",
+    path: ["sources"],
+  })
+  .refine((v) => v.sources.length !== 1 || !v.sources[0].routing, {
+    message: "Routing must be unset when there's only one source",
+    path: ["sources"],
+  });
 
 export type ProjectionFormValues = z.infer<typeof projectionSchema>;

@@ -47,10 +47,33 @@ export interface SyncSpec {
   retention?: { days: number; timestampColumn: string };
 }
 
+export interface SourceColumn {
+  source: string;
+  as?: string;
+}
+
+export interface SourceRouting {
+  type: "timeRange";
+  timestampColumn: string;
+  minAge?: string;
+  maxAge?: string;
+}
+
+export interface SourceView {
+  table: string;
+  columns: SourceColumn[];
+}
+
+export interface ProjectionSource {
+  connectionRef: string;
+  // Required when the Projection has more than one source; must be unset
+  // when it has exactly one (nothing to route between).
+  routing?: SourceRouting;
+  view: SourceView;
+}
+
 export interface ProjectionSpec {
-  sources: { syncRef: string; maxStalenessSeconds?: number }[];
-  queryable: { table: string; defaultLimit?: number };
-  tiering?: { recentSyncRef: string; historicalSyncRef: string };
+  sources: ProjectionSource[];
 }
 
 // Resource<T> mirrors httpapi.okResponse: the decoded spec plus the raw YAML
@@ -65,6 +88,19 @@ export interface Resource<TSpec> {
 export type ConnectionResource = Resource<ConnectionSpec>;
 export type SyncResource = Resource<SyncSpec>;
 export type ProjectionResource = Resource<ProjectionSpec>;
+
+export interface WorkerStatus {
+  syncName: string;
+  podPhase: string;
+  ready: boolean;
+  restarts: number;
+  alive: boolean;
+  observedPhase?: string;
+  lastHeartbeatAt?: string;
+  consumerLag?: number;
+  watermark?: string;
+  lastError?: string;
+}
 
 export type ApplyResult = { ok: true } | { ok: false; error: string };
 
@@ -97,6 +133,9 @@ export const listProjections = () =>
   get<{ items: ProjectionResource[] }>("/api/v1alpha1/projections").then((r) => r?.items ?? []);
 export const getProjection = (name: string) =>
   get<ProjectionResource>(`/api/v1alpha1/projections/${encodeURIComponent(name)}`);
+
+export const listWorkers = () =>
+  get<{ items: WorkerStatus[] }>("/api/v1alpha1/workers").then((r) => r?.items ?? []);
 
 export async function applyResource(yamlText: string): Promise<ApplyResult> {
   const res = await fetch(`${BASE}/api/v1alpha1/apply`, {

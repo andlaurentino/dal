@@ -18,6 +18,10 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
+// Matches broker's own hardcoded default (broker/internal/httpapi/handler.go)
+// — page size is a query-time/UI concern, not part of the Projection CRD.
+const DEFAULT_PAGE_SIZE = 20;
+
 export default async function QueryProjectionPage({
   params,
   searchParams,
@@ -30,7 +34,7 @@ export default async function QueryProjectionPage({
   const projection = await getProjection(name);
   if (!projection) notFound();
 
-  const limit = projection.spec.queryable.defaultLimit || 20;
+  const limit = DEFAULT_PAGE_SIZE;
   const page = Math.max(1, Number(pageParam) || 1);
   const offset = (page - 1) * limit;
 
@@ -43,10 +47,10 @@ export default async function QueryProjectionPage({
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           {result.ok && result.data.tiered && (
             <span className="rounded-full border border-border px-2 py-0.5 text-xs">
-              postgres + lake
+              {projection.spec.sources.length} sources
             </span>
           )}
-          <span>{projection.spec.queryable.table}</span>
+          <span>{projection.spec.sources.map((s) => s.view.table).join(", ")}</span>
         </div>
       </div>
 

@@ -2,6 +2,9 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
+	"sort"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -163,38 +166,145 @@ func ValidateProjection(p *Projection) error {
 	if len(p.Spec.Sources) == 0 {
 		return fmt.Errorf("spec.sources must have at least one entry")
 	}
+
+	seenConnectionRefs := make(map[string]bool, len(p.Spec.Sources))
+	windows := make([]routingWindow, 0, len(p.Spec.Sources))
+
 	for i, src := range p.Spec.Sources {
-		if src.SyncRef == "" {
-			return fmt.Errorf("spec.sources[%d].syncRef is required", i)
+		if src.ConnectionRef == "" {
+			return fmt.Errorf("spec.sources[%d].connectionRef is required", i)
 		}
-	}
-	if p.Spec.Queryable.Table == "" {
-		return fmt.Errorf("spec.queryable.table is required")
+		if seenConnectionRefs[src.ConnectionRef] {
+			return fmt.Errorf("spec.sources[%d].connectionRef %q is a duplicate", i, src.ConnectionRef)
+		}
+		seenConnectionRefs[src.ConnectionRef] = true
+
+		if src.View.Table == "" {
+			return fmt.Errorf("spec.sources[%d].view.table is required", i)
+		}
+		if len(src.View.Columns) == 0 {
+			return fmt.Errorf("spec.sources[%d].view.columns must have at least one entry", i)
+		}
+		seenCols := make(map[string]bool, len(src.View.Columns))
+		for j, c := range src.View.Columns {
+			if c.Source == "" {
+				return fmt.Errorf("spec.sources[%d].view.columns[%d].source is required", i, j)
+			}
+			name := c.As
+			if name == "" {
+				name = c.Source
+			}
+			if seenCols[name] {
+				return fmt.Errorf("spec.sources[%d].view.columns[%d]: column %q is a duplicate (after rename)", i, j, name)
+			}
+			seenCols[name] = true
+		}
+
+		if len(p.Spec.Sources) == 1 {
+			if src.Routing != nil {
+				return fmt.Errorf("spec.sources[%d].routing must be unset when spec.sources has only one entry", i)
+			}
+			continue
+		}
+
+		r := src.Routing
+		if r == nil {
+			return fmt.Errorf("spec.sources[%d].routing is required when spec.sources has more than one entry", i)
+		}
+		if r.Type != SourceRoutingTypeTimeRange {
+			return fmt.Errorf("spec.sources[%d].routing.type: unsupported type %q (only %q is implemented)", i, r.Type, SourceRoutingTypeTimeRange)
+		}
+		if r.TimestampColumn == "" {
+			return fmt.Errorf("spec.sources[%d].routing.timestampColumn is required", i)
+		}
+		w := routingWindow{i: i}
+		if r.MinAge != "" {
+			d, err := ParseAge(r.MinAge)
+			if err != nil || d < 0 {
+				return fmt.Errorf("spec.sources[%d].routing.minAge: invalid non-negative duration %q", i, r.MinAge)
+			}
+			w.min, w.hasMin = d, true
+		}
+		if r.MaxAge != "" {
+			d, err := ParseAge(r.MaxAge)
+			if err != nil || d < 0 {
+				return fmt.Errorf("spec.sources[%d].routing.maxAge: invalid non-negative duration %q", i, r.MaxAge)
+			}
+			w.max, w.hasMax = d, true
+		}
+		if w.hasMin && w.hasMax && w.min >= w.max {
+			return fmt.Errorf("spec.sources[%d].routing: minAge (%s) must be less than maxAge (%s)", i, r.MinAge, r.MaxAge)
+		}
+		windows = append(windows, w)
 	}
 
-	if t := p.Spec.Tiering; t != nil {
-		if t.RecentSyncRef == "" || t.HistoricalSyncRef == "" {
-			return fmt.Errorf("spec.tiering.recentSyncRef and spec.tiering.historicalSyncRef are both required")
-		}
-		if t.RecentSyncRef == t.HistoricalSyncRef {
-			return fmt.Errorf("spec.tiering.recentSyncRef and spec.tiering.historicalSyncRef must be different syncs")
-		}
-		var haveRecent, haveHistorical bool
-		for _, src := range p.Spec.Sources {
-			if src.SyncRef == t.RecentSyncRef {
-				haveRecent = true
-			}
-			if src.SyncRef == t.HistoricalSyncRef {
-				haveHistorical = true
-			}
-		}
-		if !haveRecent {
-			return fmt.Errorf("spec.tiering.recentSyncRef %q must also appear in spec.sources", t.RecentSyncRef)
-		}
-		if !haveHistorical {
-			return fmt.Errorf("spec.tiering.historicalSyncRef %q must also appear in spec.sources", t.HistoricalSyncRef)
+	if len(p.Spec.Sources) > 1 {
+		if err := validateContiguousWindows(windows); err != nil {
+			return err
 		}
 	}
 
+	// Every source's post-rename column set must match exactly, so a
+	// stitched multi-source read returns one consistent shape.
+	if len(p.Spec.Sources) > 1 {
+		var want []string
+		for i, src := range p.Spec.Sources {
+			got := make([]string, len(src.View.Columns))
+			for j, c := range src.View.Columns {
+				name := c.As
+				if name == "" {
+					name = c.Source
+				}
+				got[j] = name
+			}
+			if want == nil {
+				want = got
+				continue
+			}
+			if !slices.Equal(want, got) {
+				return fmt.Errorf("spec.sources[%d].view.columns: column set %v does not match an earlier source's %v — every source of a multi-source projection must expose the same columns, in the same order", i, got, want)
+			}
+		}
+	}
+
+	return nil
+}
+
+// routingWindow is one source's parsed [min,max) age bound, used only to
+// check that a multi-source Projection's windows partition time exactly.
+type routingWindow struct {
+	i              int
+	min, max       time.Duration
+	hasMin, hasMax bool
+}
+
+// validateContiguousWindows checks that a multi-source Projection's
+// routing windows partition time exactly: sorted by age (youngest first),
+// each source's max age must equal the next source's min age, the
+// youngest source must have no lower bound, and the oldest must have no
+// upper bound.
+func validateContiguousWindows(windows []routingWindow) error {
+	sorted := make([]int, len(windows))
+	for i := range sorted {
+		sorted[i] = i
+	}
+	sort.Slice(sorted, func(a, b int) bool { return windows[sorted[a]].min < windows[sorted[b]].min })
+
+	if windows[sorted[0]].hasMin {
+		return fmt.Errorf("spec.sources[%d].routing.minAge must be unset — this source has the smallest minAge, so it must have no lower bound", windows[sorted[0]].i)
+	}
+	last := len(sorted) - 1
+	if windows[sorted[last]].hasMax {
+		return fmt.Errorf("spec.sources[%d].routing.maxAge must be unset — this source has the largest minAge, so it must have no upper bound", windows[sorted[last]].i)
+	}
+	for k := 0; k < last; k++ {
+		cur, next := windows[sorted[k]], windows[sorted[k+1]]
+		if !cur.hasMax || !next.hasMin || cur.max != next.min {
+			return fmt.Errorf(
+				"spec.sources[%d].routing.maxAge must equal spec.sources[%d].routing.minAge — routing windows must be contiguous with no gaps or overlaps",
+				cur.i, next.i,
+			)
+		}
+	}
 	return nil
 }

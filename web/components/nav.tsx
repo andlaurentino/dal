@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Database, LayoutGrid, Search, Waypoints } from "lucide-react";
+import { Activity, Database, GitBranch, LayoutGrid, Search, Waypoints } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -10,6 +10,8 @@ const items = [
   { href: "/syncs", label: "Syncs", icon: Waypoints },
   { href: "/projections", label: "Projections", icon: LayoutGrid },
   { href: "/query", label: "Query", icon: Search },
+  { href: "/workers", label: "Workers", icon: Activity },
+  { href: "/lineage", label: "Lineage", icon: GitBranch },
 ];
 
 export default function Nav() {

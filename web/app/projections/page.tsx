@@ -20,7 +20,7 @@ export default async function ProjectionsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projections</h1>
           <p className="text-sm text-muted-foreground">
-            Queryable views composed from one or more Syncs.
+            Queryable views composed from one or more Connections.
           </p>
         </div>
         <Button
@@ -38,7 +38,7 @@ export default async function ProjectionsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Table</TableHead>
+              <TableHead>Tables</TableHead>
               <TableHead>Sources</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -51,7 +51,7 @@ export default async function ProjectionsPage() {
                     {p.name}
                   </Link>
                 </TableCell>
-                <TableCell>{p.spec.queryable.table}</TableCell>
+                <TableCell>{p.spec.sources.map((s) => s.view.table).join(", ")}</TableCell>
                 <TableCell>{p.spec.sources.length}</TableCell>
                 <TableCell>
                   <Link href={`/projections/${p.name}`}>

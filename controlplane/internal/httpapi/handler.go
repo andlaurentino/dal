@@ -34,6 +34,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1alpha1/"+path+"/{name}", h.handleGet(cfg))
 		mux.HandleFunc("DELETE /api/v1alpha1/"+path+"/{name}", h.handleDelete(cfg))
 	}
+	mux.HandleFunc("GET /api/v1alpha1/workers", h.handleListWorkers)
 }
 
 // kindConfig describes how to decode a resource kind, extract its name and
@@ -211,6 +212,32 @@ func (h *Handler) handleDelete(cfg kindConfig) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func (h *Handler) handleListWorkers(w http.ResponseWriter, r *http.Request) {
+	statuses, err := h.workers.ListWorkerStatus(r.Context())
+	if err != nil {
+		h.log.Error("listing worker status failed", "err", err)
+		writeError(w, http.StatusInternalServerError, codeInternal, "failed to list workers")
+		return
+	}
+
+	items := make([]workerStatusResponse, len(statuses))
+	for i, ws := range statuses {
+		items[i] = workerStatusResponse{
+			SyncName:        ws.SyncName,
+			PodPhase:        ws.PodPhase,
+			Ready:           ws.Ready,
+			Restarts:        ws.Restarts,
+			Alive:           ws.Alive,
+			ObservedPhase:   ws.ObservedPhase,
+			LastHeartbeatAt: ws.LastHeartbeatAt,
+			ConsumerLag:     ws.ConsumerLag,
+			Watermark:       ws.Watermark,
+			LastError:       ws.LastError,
+		}
+	}
+	writeJSON(w, http.StatusOK, workerStatusListResponse{Items: items})
 }
 
 func kindConfigForYAMLKind(yamlKind string) (kindConfig, bool) {
