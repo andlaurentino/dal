@@ -36,3 +36,7 @@ make down               # tear the stack down, including per-Sync worker pods (a
 ```
 
 A typical first run is `make build && make up && make apply-tiered-seed`. `apply-tiered-seed` applies [`examples/tiered-events`](examples/tiered-events) and publishes both recent and backdated events so Postgres (7-day retention) and the lake (full history) end up visibly different — right after it finishes you can open `web` (`http://localhost:30300`) and query the `events-recent`, `events-history`, and `events-combined` projections to see the tiered postgres/lake storage feature in action.
+
+A `Projection` can span multiple sources with per-source time-range routing, so a single query transparently reads recent rows from Postgres and older rows from the lake:
+
+![Projection querying and tiering across multiple sources](./docs/images/projection-tiering.png)
