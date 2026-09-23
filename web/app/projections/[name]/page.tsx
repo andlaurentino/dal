@@ -72,22 +72,6 @@ export default async function ProjectionDetailPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>Queryable</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-1 text-sm">
-          {spec.queryable.defaultLimit ? (
-            <>
-              <span className="text-muted-foreground">Default limit</span>
-              <span>{spec.queryable.defaultLimit}</span>
-            </>
-          ) : (
-            <span className="text-muted-foreground">No default limit set</span>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>Sources</CardTitle>
         </CardHeader>
         <CardContent>
@@ -95,20 +79,24 @@ export default async function ProjectionDetailPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Sync</TableHead>
+                  <TableHead>Connection</TableHead>
                   <TableHead>Table / path</TableHead>
+                  <TableHead>Columns</TableHead>
                   <TableHead>Routing</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {spec.sources.map((s) => (
-                  <TableRow key={s.syncRef}>
+                  <TableRow key={s.connectionRef}>
                     <TableCell>
-                      <Link href={`/syncs/${s.syncRef}`} className="hover:underline">
-                        {s.syncRef}
+                      <Link href={`/connections/${s.connectionRef}`} className="hover:underline">
+                        {s.connectionRef}
                       </Link>
                     </TableCell>
                     <TableCell>{s.view.table}</TableCell>
+                    <TableCell>
+                      {s.view.columns.map((c) => (c.as ? `${c.source} as ${c.as}` : c.source)).join(", ")}
+                    </TableCell>
                     <TableCell>
                       {s.routing
                         ? `${s.routing.timestampColumn}: ${s.routing.minAge ?? "0"} – ${s.routing.maxAge ?? "∞"}`

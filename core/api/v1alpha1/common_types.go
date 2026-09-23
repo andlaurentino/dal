@@ -9,8 +9,7 @@ type TypeMeta struct {
 }
 
 // ObjectMeta carries the identity of a resource. Name is the unique key
-// within its kind and is what other resources reference (connectionRef,
-// syncRef).
+// within its kind and is what other resources reference (connectionRef).
 type ObjectMeta struct {
 	Name string `json:"name" yaml:"name"`
 }

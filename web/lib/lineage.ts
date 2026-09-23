@@ -8,10 +8,11 @@
 // that's what's shown, labeled by name with its Connection as a subtitle.
 // A Sync sits between its own source and target table/topic nodes.
 // Projections attach to the table/topic node their view actually reads
-// (view.table, under the referenced Sync's target Connection) rather than
-// to the Sync itself — if a Projection's view.table doesn't match what its
-// Sync nominally writes to, that shows up honestly as two separate nodes
-// instead of silently glossing over the mismatch.
+// (view.table, under their own connectionRef) rather than to any Sync —
+// Projections read Connections directly and don't reference a Sync at
+// all, so if a Projection's view.table doesn't match what some Sync
+// happens to write to that Connection, that shows up honestly as two
+// separate nodes instead of silently glossing over the mismatch.
 import type { ConnectionResource, ProjectionResource, SyncResource, WorkerStatus } from "./controlplane";
 
 export type LineageNodeKind = "table" | "sync" | "projection";
@@ -95,7 +96,6 @@ export function buildLineageGraph(
   }
 
   const edges: LineageEdge[] = [];
-  const syncTargetConnection = new Map(syncs.map((s) => [s.name, s.spec.target.connectionRef]));
 
   for (const s of syncs) {
     const sourceName = s.spec.source.topic || s.spec.source.path || "";
@@ -110,9 +110,7 @@ export function buildLineageGraph(
 
   for (const p of projections) {
     for (const src of p.spec.sources) {
-      const connectionRef = syncTargetConnection.get(src.syncRef);
-      if (!connectionRef) continue;
-      const table = ensureTable(connectionRef, src.view.table);
+      const table = ensureTable(src.connectionRef, src.view.table);
       if (table) edges.push({ from: table, to: projectionId(p.name) });
     }
   }

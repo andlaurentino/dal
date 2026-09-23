@@ -61,11 +61,11 @@ export interface SourceRouting {
 
 export interface SourceView {
   table: string;
-  columns?: SourceColumn[];
+  columns: SourceColumn[];
 }
 
 export interface ProjectionSource {
-  syncRef: string;
+  connectionRef: string;
   // Required when the Projection has more than one source; must be unset
   // when it has exactly one (nothing to route between).
   routing?: SourceRouting;
@@ -74,7 +74,6 @@ export interface ProjectionSource {
 
 export interface ProjectionSpec {
   sources: ProjectionSource[];
-  queryable: { defaultLimit?: number };
 }
 
 // Resource<T> mirrors httpapi.okResponse: the decoded spec plus the raw YAML

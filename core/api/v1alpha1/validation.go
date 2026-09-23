@@ -167,20 +167,23 @@ func ValidateProjection(p *Projection) error {
 		return fmt.Errorf("spec.sources must have at least one entry")
 	}
 
-	seenSyncRefs := make(map[string]bool, len(p.Spec.Sources))
+	seenConnectionRefs := make(map[string]bool, len(p.Spec.Sources))
 	windows := make([]routingWindow, 0, len(p.Spec.Sources))
 
 	for i, src := range p.Spec.Sources {
-		if src.SyncRef == "" {
-			return fmt.Errorf("spec.sources[%d].syncRef is required", i)
+		if src.ConnectionRef == "" {
+			return fmt.Errorf("spec.sources[%d].connectionRef is required", i)
 		}
-		if seenSyncRefs[src.SyncRef] {
-			return fmt.Errorf("spec.sources[%d].syncRef %q is a duplicate", i, src.SyncRef)
+		if seenConnectionRefs[src.ConnectionRef] {
+			return fmt.Errorf("spec.sources[%d].connectionRef %q is a duplicate", i, src.ConnectionRef)
 		}
-		seenSyncRefs[src.SyncRef] = true
+		seenConnectionRefs[src.ConnectionRef] = true
 
 		if src.View.Table == "" {
 			return fmt.Errorf("spec.sources[%d].view.table is required", i)
+		}
+		if len(src.View.Columns) == 0 {
+			return fmt.Errorf("spec.sources[%d].view.columns must have at least one entry", i)
 		}
 		seenCols := make(map[string]bool, len(src.View.Columns))
 		for j, c := range src.View.Columns {
@@ -216,14 +219,14 @@ func ValidateProjection(p *Projection) error {
 		}
 		w := routingWindow{i: i}
 		if r.MinAge != "" {
-			d, err := time.ParseDuration(r.MinAge)
+			d, err := ParseAge(r.MinAge)
 			if err != nil || d < 0 {
 				return fmt.Errorf("spec.sources[%d].routing.minAge: invalid non-negative duration %q", i, r.MinAge)
 			}
 			w.min, w.hasMin = d, true
 		}
 		if r.MaxAge != "" {
-			d, err := time.ParseDuration(r.MaxAge)
+			d, err := ParseAge(r.MaxAge)
 			if err != nil || d < 0 {
 				return fmt.Errorf("spec.sources[%d].routing.maxAge: invalid non-negative duration %q", i, r.MaxAge)
 			}
@@ -242,19 +245,10 @@ func ValidateProjection(p *Projection) error {
 	}
 
 	// Every source's post-rename column set must match exactly, so a
-	// stitched multi-source read returns one consistent shape. Passthrough
-	// sources (no view.columns) can't be checked here — their column list
-	// only becomes known once the referenced Sync's mapping is resolved,
-	// which requires store access; that check lives in
-	// controlplane/internal/validate alongside the other referential
-	// checks. Here we only catch the case where explicit column lists
-	// disagree with each other.
+	// stitched multi-source read returns one consistent shape.
 	if len(p.Spec.Sources) > 1 {
 		var want []string
 		for i, src := range p.Spec.Sources {
-			if len(src.View.Columns) == 0 {
-				continue // passthrough; checked cross-resource
-			}
 			got := make([]string, len(src.View.Columns))
 			for j, c := range src.View.Columns {
 				name := c.As

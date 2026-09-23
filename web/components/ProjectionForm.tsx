@@ -37,21 +37,32 @@ function Field({
   );
 }
 
+interface ColumnRow {
+  source: string;
+  as?: string;
+}
+
 interface SourceRow {
-  syncRef: string;
+  connectionRef: string;
   table: string;
+  columns: ColumnRow[];
   timestampColumn?: string;
   minAge?: string;
   maxAge?: string;
 }
 
+function emptySourceRow(): SourceRow {
+  return { connectionRef: "", table: "", columns: [{ source: "" }] };
+}
+
 function rowsFromInitial(initial?: ProjectionResource): SourceRow[] {
   if (!initial?.spec.sources.length) {
-    return [{ syncRef: "", table: "" }];
+    return [emptySourceRow()];
   }
   return initial.spec.sources.map((s) => ({
-    syncRef: s.syncRef,
+    connectionRef: s.connectionRef,
     table: s.view.table,
+    columns: s.view.columns.length ? s.view.columns : [{ source: "" }],
     timestampColumn: s.routing?.timestampColumn,
     minAge: s.routing?.minAge,
     maxAge: s.routing?.maxAge,
@@ -61,11 +72,11 @@ function rowsFromInitial(initial?: ProjectionResource): SourceRow[] {
 export default function ProjectionForm({
   mode,
   initial,
-  syncNames,
+  connectionNames,
 }: {
   mode: "create" | "edit";
   initial?: ProjectionResource;
-  syncNames: string[];
+  connectionNames: string[];
 }) {
   const [state, formAction, pending] = useActionState(
     applyProjectionAction,
@@ -77,6 +88,35 @@ export default function ProjectionForm({
 
   function updateRow(index: number, patch: Partial<SourceRow>) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function updateColumn(rowIndex: number, colIndex: number, patch: Partial<ColumnRow>) {
+    setRows((prev) =>
+      prev.map((row, i) =>
+        i === rowIndex
+          ? {
+              ...row,
+              columns: row.columns.map((c, j) => (j === colIndex ? { ...c, ...patch } : c)),
+            }
+          : row,
+      ),
+    );
+  }
+
+  function addColumn(rowIndex: number) {
+    setRows((prev) =>
+      prev.map((row, i) =>
+        i === rowIndex ? { ...row, columns: [...row.columns, { source: "" }] } : row,
+      ),
+    );
+  }
+
+  function removeColumn(rowIndex: number, colIndex: number) {
+    setRows((prev) =>
+      prev.map((row, i) =>
+        i === rowIndex ? { ...row, columns: row.columns.filter((_, j) => j !== colIndex) } : row,
+      ),
+    );
   }
 
   return (
@@ -109,7 +149,7 @@ export default function ProjectionForm({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setRows((prev) => [...prev, { syncRef: "", table: "" }])}
+            onClick={() => setRows((prev) => [...prev, emptySourceRow()])}
           >
             <Plus />
             Add source
@@ -119,7 +159,7 @@ export default function ProjectionForm({
         {needsRouting && (
           <p className="text-xs text-muted-foreground">
             With more than one source, each needs its own routing: a timestamp column and an
-            age window (minAge/maxAge, e.g. &quot;168h&quot;) that, together across all sources,
+            age window (minAge/maxAge, e.g. &quot;7d&quot; or &quot;168h&quot;) that, together across all sources,
             partition time with no gaps or overlaps — youngest source&apos;s minAge and oldest
             source&apos;s maxAge stay blank.
           </p>
@@ -129,16 +169,16 @@ export default function ProjectionForm({
           {rows.map((row, i) => (
             <div key={i} className="grid gap-2 rounded-lg border border-border p-3">
               <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-                <Field label="Sync" htmlFor={`sync-${i}`}>
+                <Field label="Connection" htmlFor={`connection-${i}`}>
                   <Select
-                    value={row.syncRef || undefined}
-                    onValueChange={(v) => updateRow(i, { syncRef: v ?? "" })}
+                    value={row.connectionRef || undefined}
+                    onValueChange={(v) => updateRow(i, { connectionRef: v ?? "" })}
                   >
-                    <SelectTrigger id={`sync-${i}`} className="w-full">
-                      <SelectValue placeholder="Select a sync" />
+                    <SelectTrigger id={`connection-${i}`} className="w-full">
+                      <SelectValue placeholder="Select a connection" />
                     </SelectTrigger>
                     <SelectContent>
-                      {syncNames.map((n) => (
+                      {connectionNames.map((n) => (
                         <SelectItem key={n} value={n}>
                           {n}
                         </SelectItem>
@@ -165,6 +205,47 @@ export default function ProjectionForm({
                 </Button>
               </div>
 
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Columns</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addColumn(i)}>
+                    <Plus />
+                    Add column
+                  </Button>
+                </div>
+                <div className="grid gap-2">
+                  {row.columns.map((col, j) => (
+                    <div key={j} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                      <Field label="Column" htmlFor={`col-source-${i}-${j}`}>
+                        <Input
+                          id={`col-source-${i}-${j}`}
+                          placeholder="occurred_at"
+                          value={col.source}
+                          onChange={(e) => updateColumn(i, j, { source: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Rename to (optional)" htmlFor={`col-as-${i}-${j}`}>
+                        <Input
+                          id={`col-as-${i}-${j}`}
+                          placeholder={col.source || "same name"}
+                          value={col.as ?? ""}
+                          onChange={(e) => updateColumn(i, j, { as: e.target.value })}
+                        />
+                      </Field>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={row.columns.length === 1}
+                        onClick={() => removeColumn(i, j)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {needsRouting && (
                 <div className="grid grid-cols-3 gap-2">
                   <Field label="Timestamp column" htmlFor={`ts-${i}`}>
@@ -178,7 +259,7 @@ export default function ProjectionForm({
                   <Field label="Min age (blank = youngest)" htmlFor={`minage-${i}`}>
                     <Input
                       id={`minage-${i}`}
-                      placeholder="168h"
+                      placeholder="7d"
                       value={row.minAge ?? ""}
                       onChange={(e) => updateRow(i, { minAge: e.target.value })}
                     />
@@ -186,7 +267,7 @@ export default function ProjectionForm({
                   <Field label="Max age (blank = oldest)" htmlFor={`maxage-${i}`}>
                     <Input
                       id={`maxage-${i}`}
-                      placeholder="168h"
+                      placeholder="7d"
                       value={row.maxAge ?? ""}
                       onChange={(e) => updateRow(i, { maxAge: e.target.value })}
                     />
@@ -197,18 +278,6 @@ export default function ProjectionForm({
           ))}
         </div>
       </div>
-
-      <Separator />
-
-      <Field label="Default limit (optional)" htmlFor="defaultLimit">
-        <Input
-          id="defaultLimit"
-          name="defaultLimit"
-          type="number"
-          min={1}
-          defaultValue={initial?.spec.queryable.defaultLimit}
-        />
-      </Field>
 
       <div>
         <Button type="submit" disabled={pending}>

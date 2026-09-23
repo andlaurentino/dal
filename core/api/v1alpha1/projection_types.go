@@ -1,8 +1,8 @@
 package v1alpha1
 
-// Projection exposes a queryable logical view backed by one or more Syncs.
-// Projections reference Syncs (not raw Connections) so the query planner
-// can key off each source's own mapped schema.
+// Projection exposes a queryable logical view backed by one or more
+// Connections, read directly — independent of whatever Sync (if any) wrote
+// to them.
 type Projection struct {
 	TypeMeta `yaml:",inline"`
 	Metadata ObjectMeta     `json:"metadata" yaml:"metadata"`
@@ -10,13 +10,13 @@ type Projection struct {
 }
 
 type ProjectionSpec struct {
-	Sources   []ProjectionSource  `json:"sources" yaml:"sources"`
-	Queryable ProjectionQueryable `json:"queryable,omitempty" yaml:"queryable,omitempty"`
+	Sources []ProjectionSource `json:"sources" yaml:"sources"`
 }
 
-// ProjectionSource is one Sync this Projection reads from, with its own
-// view of that Sync's data (View) and, when the Projection has more than
-// one source, how queries route across them (Routing).
+// ProjectionSource is one Connection this Projection reads from directly,
+// with its own view of that Connection's data (View) and, when the
+// Projection has more than one source, how queries route across them
+// (Routing).
 //
 // This replaces the earlier design where exactly two sources were
 // special-cased via spec.tiering{recentSyncRef,historicalSyncRef} and the
@@ -26,8 +26,13 @@ type ProjectionSpec struct {
 // rows) — and had no answer at all for a Sync populated by some other
 // means with no spec.retention set. Routing now belongs entirely to the
 // Projection, and any number of sources can participate.
+//
+// Sources name a Connection, not a Sync: a Projection's query-time shape
+// shouldn't depend on which ingestion job (if any) populated the
+// underlying table/path, and a Connection may be written to by more than
+// one Sync, or by nothing at all (e.g. a hand-seeded table).
 type ProjectionSource struct {
-	SyncRef string `json:"syncRef" yaml:"syncRef"`
+	ConnectionRef string `json:"connectionRef" yaml:"connectionRef"`
 	// Routing decides which page of a query this source answers, relative
 	// to the Projection's other sources. Required when spec.sources has
 	// more than one entry; must be unset when there's exactly one (nothing
@@ -59,8 +64,9 @@ const (
 type SourceRouting struct {
 	Type            SourceRoutingType `json:"type" yaml:"type"`
 	TimestampColumn string            `json:"timestampColumn" yaml:"timestampColumn"`
-	// MinAge/MaxAge are Go duration strings (e.g. "168h"), always
-	// non-negative.
+	// MinAge/MaxAge are duration strings, always non-negative: either a Go
+	// duration (e.g. "168h", "30m") or a day count suffixed with "d" (e.g.
+	// "7d"), parsed by ParseAge.
 	MinAge string `json:"minAge,omitempty" yaml:"minAge,omitempty"`
 	MaxAge string `json:"maxAge,omitempty" yaml:"maxAge,omitempty"`
 }
@@ -71,24 +77,20 @@ type SourceView struct {
 	// to read — this source's own name, independent of any other
 	// source's.
 	Table string `json:"table" yaml:"table"`
-	// Columns optionally selects and renames a subset of this source's
-	// mapped columns. Omit for passthrough (every column the underlying
-	// Sync's mapping produces, in its own order). When a Projection has
-	// more than one source, every source's post-rename column set
-	// (whether from Columns or passthrough) must match exactly, so a
-	// stitched read returns one consistent shape.
-	Columns []SourceColumn `json:"columns,omitempty" yaml:"columns,omitempty"`
+	// Columns selects and optionally renames the columns this source
+	// exposes — required, at least one entry. There is no passthrough:
+	// a Connection carries no schema to pass through from, so every
+	// column a Projection reads must be named explicitly. When a
+	// Projection has more than one source, every source's post-rename
+	// column set must match exactly, so a stitched read returns one
+	// consistent shape.
+	Columns []SourceColumn `json:"columns" yaml:"columns"`
 }
 
-// SourceColumn selects one column from a Sync's mapped output (Source,
-// which must match a core/api/v1alpha1.SyncFieldMapping.Column in that
-// Sync) and optionally renames it (As). Renaming only — no computed
-// expressions in this slice.
+// SourceColumn selects one column from the underlying table/path (Source)
+// and optionally renames it (As). Renaming only — no computed expressions
+// in this slice.
 type SourceColumn struct {
 	Source string `json:"source" yaml:"source"`
 	As     string `json:"as,omitempty" yaml:"as,omitempty"`
-}
-
-type ProjectionQueryable struct {
-	DefaultLimit int64 `json:"defaultLimit,omitempty" yaml:"defaultLimit,omitempty"`
 }

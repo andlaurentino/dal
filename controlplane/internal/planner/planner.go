@@ -1,10 +1,10 @@
 // Package planner resolves which store/connection/table(s) should answer a
-// query against a named Projection, by walking Projection -> Sync ->
-// Connection through internal/store. A single-source projection resolves
-// to one StorePlan. A multi-source projection resolves to one StorePlan
-// per source, ordered youngest-to-oldest by its routing window, plus the
-// age bounds and column view broker needs to route and stitch pages
-// across them.
+// query against a named Projection, by walking Projection -> Connection
+// through internal/store. A single-source projection resolves to one
+// StorePlan. A multi-source projection resolves to one StorePlan per
+// source, ordered youngest-to-oldest by its routing window, plus the age
+// bounds and column view broker needs to route and stitch pages across
+// them.
 package planner
 
 import (
@@ -69,11 +69,7 @@ func Resolve(ctx context.Context, st *store.Store, projectionName string) (*Plan
 
 	sources := make([]StorePlan, len(p.Spec.Sources))
 	for i, src := range p.Spec.Sources {
-		s, err := getSync(ctx, st, src.SyncRef)
-		if err != nil {
-			return nil, err
-		}
-		sp, err := storePlanFor(ctx, st, s, src)
+		sp, err := storePlanFor(ctx, st, src)
 		if err != nil {
 			return nil, err
 		}
@@ -96,50 +92,50 @@ func age(d *time.Duration) time.Duration {
 	return *d
 }
 
-// storePlanFor resolves one Projection source's Sync + target Connection
-// + view/routing into a StorePlan.
-func storePlanFor(ctx context.Context, st *store.Store, s *v1alpha1.Sync, src v1alpha1.ProjectionSource) (*StorePlan, error) {
-	c, err := getConnection(ctx, st, s.Spec.Target.ConnectionRef)
+// storePlanFor resolves one Projection source's Connection + view/routing
+// into a StorePlan.
+func storePlanFor(ctx context.Context, st *store.Store, src v1alpha1.ProjectionSource) (*StorePlan, error) {
+	c, err := getConnection(ctx, st, src.ConnectionRef)
 	if err != nil {
 		return nil, err
 	}
 
 	sp := &StorePlan{
 		StoreType:     string(c.Spec.Type),
-		ConnectionRef: s.Spec.Target.ConnectionRef,
+		ConnectionRef: src.ConnectionRef,
 		Target:        src.View.Table,
-		Columns:       columnsFor(src, s),
+		Columns:       columnsFor(src),
 	}
 
 	switch c.Spec.Type {
 	case v1alpha1.ConnectionTypePostgres:
 		if c.Spec.Postgres == nil {
-			return nil, fmt.Errorf("connection %q has type postgres but spec.postgres is not set", s.Spec.Target.ConnectionRef)
+			return nil, fmt.Errorf("connection %q has type postgres but spec.postgres is not set", src.ConnectionRef)
 		}
 		sp.DSN = c.Spec.Postgres.DSN
 	case v1alpha1.ConnectionTypeDatalake:
 		if c.Spec.Datalake == nil {
-			return nil, fmt.Errorf("connection %q has type datalake but spec.datalake is not set", s.Spec.Target.ConnectionRef)
+			return nil, fmt.Errorf("connection %q has type datalake but spec.datalake is not set", src.ConnectionRef)
 		}
 		sp.Endpoint = c.Spec.Datalake.Endpoint
 		sp.Bucket = c.Spec.Datalake.Bucket
 	default:
-		return nil, fmt.Errorf("connection %q has type %q, which is not queryable", s.Spec.Target.ConnectionRef, c.Spec.Type)
+		return nil, fmt.Errorf("connection %q has type %q, which is not queryable", src.ConnectionRef, c.Spec.Type)
 	}
 
 	if r := src.Routing; r != nil {
 		sp.OrderBy = r.TimestampColumn
 		if r.MinAge != "" {
-			d, err := time.ParseDuration(r.MinAge)
+			d, err := v1alpha1.ParseAge(r.MinAge)
 			if err != nil {
-				return nil, fmt.Errorf("sync %q: invalid routing.minAge %q: %w", s.Metadata.Name, r.MinAge, err)
+				return nil, fmt.Errorf("source %q: invalid routing.minAge %q: %w", src.ConnectionRef, r.MinAge, err)
 			}
 			sp.MinAge = &d
 		}
 		if r.MaxAge != "" {
-			d, err := time.ParseDuration(r.MaxAge)
+			d, err := v1alpha1.ParseAge(r.MaxAge)
 			if err != nil {
-				return nil, fmt.Errorf("sync %q: invalid routing.maxAge %q: %w", s.Metadata.Name, r.MaxAge, err)
+				return nil, fmt.Errorf("source %q: invalid routing.maxAge %q: %w", src.ConnectionRef, r.MaxAge, err)
 			}
 			sp.MaxAge = &d
 		}
@@ -148,24 +144,17 @@ func storePlanFor(ctx context.Context, st *store.Store, s *v1alpha1.Sync, src v1
 	return sp, nil
 }
 
-// columnsFor resolves a source's final Source->As column list: its own
-// view.columns if set, or every column the Sync's mapping produces (in
-// mapping order) for passthrough.
-func columnsFor(src v1alpha1.ProjectionSource, s *v1alpha1.Sync) []ColumnPlan {
-	if len(src.View.Columns) > 0 {
-		cols := make([]ColumnPlan, len(src.View.Columns))
-		for i, c := range src.View.Columns {
-			as := c.As
-			if as == "" {
-				as = c.Source
-			}
-			cols[i] = ColumnPlan{Source: c.Source, As: as}
+// columnsFor resolves a source's final Source->As column list from its
+// own view.columns — always set, since a Connection carries no schema to
+// pass through from.
+func columnsFor(src v1alpha1.ProjectionSource) []ColumnPlan {
+	cols := make([]ColumnPlan, len(src.View.Columns))
+	for i, c := range src.View.Columns {
+		as := c.As
+		if as == "" {
+			as = c.Source
 		}
-		return cols
-	}
-	cols := make([]ColumnPlan, len(s.Spec.Mapping.Schema))
-	for i, f := range s.Spec.Mapping.Schema {
-		cols[i] = ColumnPlan{Source: f.Column, As: f.Column}
+		cols[i] = ColumnPlan{Source: c.Source, As: as}
 	}
 	return cols
 }
@@ -179,17 +168,6 @@ func getProjection(ctx context.Context, st *store.Store, name string) (*v1alpha1
 		return nil, err
 	}
 	return v1alpha1.DecodeProjection(raw)
-}
-
-func getSync(ctx context.Context, st *store.Store, name string) (*v1alpha1.Sync, error) {
-	raw, err := st.Get(ctx, store.KindSync, name)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("sync %q does not exist", name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return v1alpha1.DecodeSync(raw)
 }
 
 func getConnection(ctx context.Context, st *store.Store, name string) (*v1alpha1.Connection, error) {

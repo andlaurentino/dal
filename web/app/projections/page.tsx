@@ -20,7 +20,7 @@ export default async function ProjectionsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projections</h1>
           <p className="text-sm text-muted-foreground">
-            Queryable views composed from one or more Syncs.
+            Queryable views composed from one or more Connections.
           </p>
         </div>
         <Button

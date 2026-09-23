@@ -17,16 +17,20 @@ single Projection that hides the seam.
 - `sync-lake.yaml` (`events-to-lake`) — kafka → lake, no retention: a Delta
   table (with Change Data Feed enabled) holding the full history of every
   event ever produced.
-- `projection-postgres.yaml` / `projection-lake.yaml` — single-tier views
-  over each Sync individually, useful for testing each tier in isolation.
-  Each source names its own `view.table` — there's no Projection-wide table
-  override.
+- `projection-postgres.yaml` / `projection-lake.yaml` — single-tier views,
+  each reading its Connection (`postgres`/`datalake`) directly — a
+  Projection's sources name a Connection, not a Sync, so they work whether
+  or not a Sync ever wrote to that table. Each source names its own
+  `view.table` (no Projection-wide table override) and an explicit
+  `view.columns` list — there's no passthrough, since a Connection carries
+  no schema to pass through from.
 - `projection-combined.yaml` (`events-combined`) — the tiered Projection:
   two sources, each with its own `routing` (`type: timeRange`,
-  `timestampColumn: occurred_at`, and a `minAge`/`maxAge` window) that
-  together partition time with no gap or overlap — `events-to-postgres`
-  answers rows younger than 168h (7 days), `events-to-lake` answers
-  everything 168h or older. This routing lives entirely on the Projection;
+  `timestampColumn: occurred_at`, and a `minAge`/`maxAge` window — a Go
+  duration like `168h` or a day count like `7d`) that together partition
+  time with no gap or overlap — `events-to-postgres` answers rows younger
+  than 7d, `events-to-lake` answers everything 7d or older. This routing
+  lives entirely on the Projection;
   it doesn't require `events-to-postgres` to declare `spec.retention` at
   all (they happen to agree here, but a source populated by some other
   means with no retention concept still works). `broker` resolves this

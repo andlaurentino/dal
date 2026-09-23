@@ -139,8 +139,9 @@ export async function applyProjectionAction(
   }
 
   let rows: {
-    syncRef: string;
+    connectionRef: string;
     table: string;
+    columns: { source: string; as?: string }[];
     timestampColumn?: string;
     minAge?: string;
     maxAge?: string;
@@ -152,8 +153,8 @@ export async function applyProjectionAction(
   }
 
   const sources = rows.map((r) => ({
-    syncRef: r.syncRef,
-    view: { table: r.table },
+    connectionRef: r.connectionRef,
+    view: { table: r.table, columns: r.columns },
     ...(rows.length > 1
       ? {
           routing: {
@@ -166,13 +167,7 @@ export async function applyProjectionAction(
       : {}),
   }));
 
-  const defaultLimitRaw = String(formData.get("defaultLimit") ?? "");
-  const spec = {
-    sources,
-    queryable: {
-      defaultLimit: defaultLimitRaw || undefined,
-    },
-  };
+  const spec = { sources };
 
   const parsed = projectionSchema.safeParse(spec);
   if (!parsed.success) {

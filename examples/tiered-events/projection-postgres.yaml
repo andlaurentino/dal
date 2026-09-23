@@ -1,12 +1,14 @@
-# Recent-only view: last 7 days, served entirely from postgres.
 apiVersion: dal.io/v1alpha1
 kind: Projection
 metadata:
   name: events-recent
 spec:
   sources:
-    - syncRef: events-to-postgres
+    - connectionRef: postgres
       view:
         table: user_events
-  queryable:
-    defaultLimit: 20
+        columns:
+          - source: event_id
+          - source: user_id
+          - source: event_type
+          - source: occurred_at

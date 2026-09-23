@@ -1,5 +1,3 @@
-# Recent-window sync: kafka -> postgres, pruned to the last 7 days by
-# workerd. Fast/indexed for the most common "recent activity" queries.
 apiVersion: dal.io/v1alpha1
 kind: Sync
 metadata:
