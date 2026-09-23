@@ -1,7 +1,7 @@
 apiVersion: dal.io/v1alpha1
 kind: Connection
 metadata:
-  name: pg-warehouse
+  name: postgres
 spec:
   type: postgres
   postgres:

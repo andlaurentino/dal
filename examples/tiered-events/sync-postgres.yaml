@@ -6,10 +6,10 @@ metadata:
   name: events-to-postgres
 spec:
   source:
-    connectionRef: kafka-events
+    connectionRef: kafka
     topic: user-events
   target:
-    connectionRef: pg-warehouse
+    connectionRef: postgres
     table: user_events
   mode: streaming
   replication: delta

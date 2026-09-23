@@ -7,7 +7,7 @@ metadata:
   name: events-to-lake
 spec:
   source:
-    connectionRef: kafka-events
+    connectionRef: kafka
     topic: user-events
   target:
     connectionRef: datalake
