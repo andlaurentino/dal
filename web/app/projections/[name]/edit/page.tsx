@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getProjection, listConnections } from "@/lib/controlplane";
-import ProjectionForm from "@/components/ProjectionForm";
+import ProjectionEditor from "@/components/ProjectionEditor";
 
 export default async function EditProjectionPage({
   params,
@@ -14,7 +14,7 @@ export default async function EditProjectionPage({
   return (
     <div className="grid gap-6">
       <h1 className="text-2xl font-semibold tracking-tight">Edit {projection.name}</h1>
-      <ProjectionForm
+      <ProjectionEditor
         mode="edit"
         initial={projection}
         connectionNames={connections.map((c) => c.name)}

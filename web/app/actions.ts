@@ -4,22 +4,23 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { applyResource, deleteResource, kindPath, type Kind } from "@/lib/controlplane";
 import { connectionSchema, nameSchema, projectionSchema, syncSchema } from "@/lib/schemas";
+import {
+  buildConnectionSpec,
+  buildProjectionSpec,
+  buildSyncSpec,
+  parseYamlDocument,
+  zodFieldErrors,
+} from "@/lib/resourceForm";
 import type { FormActionState } from "@/lib/form-state";
 
-function zodFieldErrors(issues: { path: PropertyKey[]; message: string }[]): Record<string, string> {
-  const errors: Record<string, string> = {};
-  for (const issue of issues) {
-    const path = issue.path.join(".");
-    if (!(path in errors)) errors[path] = issue.message;
-  }
-  return errors;
+function applyDone(kind: Kind, name: string): never {
+  const path = kindPath(kind);
+  revalidatePath(`/${path}`);
+  revalidatePath(`/${path}/${name}`);
+  redirect(`/${path}/${name}`);
 }
 
-async function submitApply(
-  kind: Kind,
-  name: string,
-  spec: unknown,
-): Promise<FormActionState> {
+async function submitApply(kind: Kind, name: string, spec: unknown): Promise<FormActionState> {
   const body = JSON.stringify({
     apiVersion: "dal.io/v1alpha1",
     kind,
@@ -32,10 +33,7 @@ async function submitApply(
     return { ok: false, formError: result.error };
   }
 
-  const path = kindPath(kind);
-  revalidatePath(`/${path}`);
-  revalidatePath(`/${path}/${name}`);
-  redirect(`/${path}/${name}`);
+  applyDone(kind, name);
 }
 
 export async function applyConnectionAction(
@@ -48,30 +46,7 @@ export async function applyConnectionAction(
     return { ok: false, fieldErrors: { name: nameCheck.error.issues[0].message } };
   }
 
-  const type = String(formData.get("type") ?? "");
-  let spec: Record<string, unknown>;
-  if (type === "kafka") {
-    spec = {
-      type,
-      kafka: {
-        brokers: String(formData.get("brokers") ?? "")
-          .split(",")
-          .map((b) => b.trim())
-          .filter(Boolean),
-        saslMechanism: String(formData.get("saslMechanism") ?? "") || undefined,
-      },
-    };
-  } else if (type === "postgres") {
-    spec = { type, postgres: { dsn: String(formData.get("dsn") ?? "") } };
-  } else {
-    spec = {
-      type,
-      datalake: {
-        endpoint: String(formData.get("endpoint") ?? ""),
-        bucket: String(formData.get("bucket") ?? ""),
-      },
-    };
-  }
+  const spec = buildConnectionSpec(formData);
 
   const parsed = connectionSchema.safeParse(spec);
   if (!parsed.success) {
@@ -91,34 +66,7 @@ export async function applySyncAction(
     return { ok: false, fieldErrors: { name: nameCheck.error.issues[0].message } };
   }
 
-  let mappingSchema: unknown[] = [];
-  try {
-    mappingSchema = JSON.parse(String(formData.get("mappingSchema") ?? "[]"));
-  } catch {
-    mappingSchema = [];
-  }
-
-  const spec = {
-    source: {
-      connectionRef: String(formData.get("sourceConnectionRef") ?? ""),
-      topic: String(formData.get("sourceTopic") ?? "") || undefined,
-      path: String(formData.get("sourcePath") ?? "") || undefined,
-      checkpointPath: String(formData.get("sourceCheckpointPath") ?? "") || undefined,
-    },
-    target: {
-      connectionRef: String(formData.get("targetConnectionRef") ?? ""),
-      table: String(formData.get("targetTable") ?? "") || undefined,
-      path: String(formData.get("targetPath") ?? "") || undefined,
-    },
-    mode: String(formData.get("mode") ?? ""),
-    replication: String(formData.get("replication") ?? ""),
-    schedule: String(formData.get("schedule") ?? "") || undefined,
-    consumerGroup: String(formData.get("consumerGroup") ?? "") || undefined,
-    mapping: {
-      keyField: String(formData.get("keyField") ?? ""),
-      schema: mappingSchema,
-    },
-  };
+  const spec = buildSyncSpec(formData);
 
   const parsed = syncSchema.safeParse(spec);
   if (!parsed.success) {
@@ -138,36 +86,7 @@ export async function applyProjectionAction(
     return { ok: false, fieldErrors: { name: nameCheck.error.issues[0].message } };
   }
 
-  let rows: {
-    connectionRef: string;
-    table: string;
-    columns: { source: string; as?: string }[];
-    timestampColumn?: string;
-    minAge?: string;
-    maxAge?: string;
-  }[] = [];
-  try {
-    rows = JSON.parse(String(formData.get("sources") ?? "[]"));
-  } catch {
-    rows = [];
-  }
-
-  const sources = rows.map((r) => ({
-    connectionRef: r.connectionRef,
-    view: { table: r.table, columns: r.columns },
-    ...(rows.length > 1
-      ? {
-          routing: {
-            type: "timeRange" as const,
-            timestampColumn: r.timestampColumn ?? "",
-            minAge: r.minAge || undefined,
-            maxAge: r.maxAge || undefined,
-          },
-        }
-      : {}),
-  }));
-
-  const spec = { sources };
+  const spec = buildProjectionSpec(formData);
 
   const parsed = projectionSchema.safeParse(spec);
   if (!parsed.success) {
@@ -175,6 +94,35 @@ export async function applyProjectionAction(
   }
 
   return submitApply("Projection", name, parsed.data);
+}
+
+export async function applyRawResourceAction(
+  kind: Kind,
+  expectedName: string | undefined,
+  _prevState: FormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  const yamlText = String(formData.get("yaml") ?? "");
+  const doc = parseYamlDocument(yamlText);
+  if (!doc.ok) {
+    return { ok: false, formError: `Invalid YAML: ${doc.error}` };
+  }
+  if (doc.kind !== kind) {
+    return { ok: false, formError: `kind must be "${kind}"` };
+  }
+  if (expectedName && doc.name !== expectedName) {
+    return {
+      ok: false,
+      formError: `Renaming via YAML isn't supported — keep metadata.name as "${expectedName}"`,
+    };
+  }
+
+  const result = await applyResource(yamlText);
+  if (!result.ok) {
+    return { ok: false, formError: result.error };
+  }
+
+  applyDone(kind, doc.name);
 }
 
 export async function deleteResourceAction(kind: Kind, name: string): Promise<void> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { forwardRef, useActionState, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { applySyncAction } from "@/app/actions";
 import { initialFormActionState } from "@/lib/form-state";
@@ -43,15 +43,10 @@ interface MappingRow {
   type: string;
 }
 
-export default function SyncForm({
-  mode,
-  initial,
-  connectionNames,
-}: {
-  mode: "create" | "edit";
-  initial?: SyncResource;
-  connectionNames: string[];
-}) {
+const SyncForm = forwardRef<
+  HTMLFormElement,
+  { mode: "create" | "edit"; initial?: SyncResource; connectionNames: string[] }
+>(function SyncForm({ mode, initial, connectionNames }, ref) {
   const [state, formAction, pending] = useActionState(applySyncAction, initialFormActionState);
   const [syncMode, setSyncMode] = useState(initial?.spec.mode ?? "streaming");
   const [rows, setRows] = useState<MappingRow[]>(
@@ -66,7 +61,7 @@ export default function SyncForm({
   }
 
   return (
-    <form action={formAction} className="grid gap-6">
+    <form ref={ref} action={formAction} className="grid gap-6">
       {state.formError && (
         <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
           {state.formError}
@@ -82,7 +77,13 @@ export default function SyncForm({
             <input type="hidden" name="name" value={initial?.name} />
           </>
         ) : (
-          <Input id="name" name="name" placeholder="my-sync" required />
+          <Input
+            id="name"
+            name="name"
+            placeholder="my-sync"
+            defaultValue={initial?.name}
+            required
+          />
         )}
       </Field>
 
@@ -282,4 +283,6 @@ export default function SyncForm({
       </div>
     </form>
   );
-}
+});
+
+export default SyncForm;

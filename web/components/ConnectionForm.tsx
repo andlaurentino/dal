@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { forwardRef, useActionState, useState } from "react";
 import { applyConnectionAction } from "@/app/actions";
 import { initialFormActionState } from "@/lib/form-state";
 import type { ConnectionResource } from "@/lib/controlplane";
@@ -36,13 +36,10 @@ function Field({
   );
 }
 
-export default function ConnectionForm({
-  mode,
-  initial,
-}: {
-  mode: "create" | "edit";
-  initial?: ConnectionResource;
-}) {
+const ConnectionForm = forwardRef<
+  HTMLFormElement,
+  { mode: "create" | "edit"; initial?: ConnectionResource }
+>(function ConnectionForm({ mode, initial }, ref) {
   const [state, formAction, pending] = useActionState(
     applyConnectionAction,
     initialFormActionState,
@@ -51,7 +48,7 @@ export default function ConnectionForm({
   const errors = state.fieldErrors ?? {};
 
   return (
-    <form action={formAction} className="grid gap-6">
+    <form ref={ref} action={formAction} className="grid gap-6">
       {state.formError && (
         <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
           {state.formError}
@@ -65,7 +62,13 @@ export default function ConnectionForm({
             <input type="hidden" name="name" value={initial?.name} />
           </>
         ) : (
-          <Input id="name" name="name" placeholder="my-connection" required />
+          <Input
+            id="name"
+            name="name"
+            placeholder="my-connection"
+            defaultValue={initial?.name}
+            required
+          />
         )}
       </Field>
 
@@ -137,4 +140,6 @@ export default function ConnectionForm({
       </div>
     </form>
   );
-}
+});
+
+export default ConnectionForm;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { forwardRef, useActionState, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { applyProjectionAction } from "@/app/actions";
 import { initialFormActionState } from "@/lib/form-state";
@@ -69,15 +69,10 @@ function rowsFromInitial(initial?: ProjectionResource): SourceRow[] {
   }));
 }
 
-export default function ProjectionForm({
-  mode,
-  initial,
-  connectionNames,
-}: {
-  mode: "create" | "edit";
-  initial?: ProjectionResource;
-  connectionNames: string[];
-}) {
+const ProjectionForm = forwardRef<
+  HTMLFormElement,
+  { mode: "create" | "edit"; initial?: ProjectionResource; connectionNames: string[] }
+>(function ProjectionForm({ mode, initial, connectionNames }, ref) {
   const [state, formAction, pending] = useActionState(
     applyProjectionAction,
     initialFormActionState,
@@ -120,7 +115,7 @@ export default function ProjectionForm({
   }
 
   return (
-    <form action={formAction} className="grid gap-6">
+    <form ref={ref} action={formAction} className="grid gap-6">
       {state.formError && (
         <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
           {state.formError}
@@ -136,7 +131,13 @@ export default function ProjectionForm({
             <input type="hidden" name="name" value={initial?.name} />
           </>
         ) : (
-          <Input id="name" name="name" placeholder="my-projection" required />
+          <Input
+            id="name"
+            name="name"
+            placeholder="my-projection"
+            defaultValue={initial?.name}
+            required
+          />
         )}
       </Field>
 
@@ -287,4 +288,6 @@ export default function ProjectionForm({
       </div>
     </form>
   );
-}
+});
+
+export default ProjectionForm;
